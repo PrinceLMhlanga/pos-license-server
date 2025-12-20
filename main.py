@@ -30,18 +30,36 @@ if not all([DATABASE_URL, PRIVATE_KEY_PATH, PUBLIC_KEY_PATH]):
 engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=engine)
 
-# load keys (we keep loading public/private in case you use them elsewhere)
-def load_private_key(path: str):
+# --- Replace the key-loading block with this (or add below existing load functions) ---
+
+def load_private_key_from_file(path: str):
     with open(path, "rb") as f:
         return f.read()
 
-def load_public_key(path: str):
+def load_public_key_from_file(path: str):
     with open(path, "rb") as f:
         return f.read()
 
-PRIVATE_KEY = load_private_key(PRIVATE_KEY_PATH)
-PUBLIC_KEY = load_public_key(PUBLIC_KEY_PATH)
+# Prefer explicit env vars with key text (PRIVATE_KEY / PUBLIC_KEY), fallback to file paths
+PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY")  # raw PEM text allowed
+PUBLIC_KEY_ENV = os.getenv("PUBLIC_KEY")
 
+if PRIVATE_KEY_ENV:
+    # If user supplied the key as env var, accept bytes or str
+    PRIVATE_KEY = PRIVATE_KEY_ENV.encode() if isinstance(PRIVATE_KEY_ENV, str) else PRIVATE_KEY_ENV
+else:
+    # fallback to path
+    if not PRIVATE_KEY_PATH:
+        raise RuntimeError("Set PRIVATE_KEY (env) or PRIVATE_KEY_PATH (env) in .env / Render environment")
+    PRIVATE_KEY = load_private_key_from_file(PRIVATE_KEY_PATH)
+
+if PUBLIC_KEY_ENV:
+    PUBLIC_KEY = PUBLIC_KEY_ENV.encode() if isinstance(PUBLIC_KEY_ENV, str) else PUBLIC_KEY_ENV
+else:
+    if not PUBLIC_KEY_PATH:
+        raise RuntimeError("Set PUBLIC_KEY (env) or PUBLIC_KEY_PATH (env) in .env / Render environment")
+    PUBLIC_KEY = load_public_key_from_file(PUBLIC_KEY_PATH)
+# ---
 # Twilio client
 twilio_client = TwilioClient(TW_SID, TW_TOKEN) if TW_SID and TW_TOKEN else None
 
@@ -66,6 +84,16 @@ class ActivationRequest(BaseModel):
     license_key: str
     terminal_id: str
     extra: dict = {}
+
+def _get_last_activation_terminal(session, license_id):
+    """
+    Returns the most recent terminal_id for given license_id, or None if none exists.
+    """
+    row = session.execute(
+        sa.text("SELECT terminal_id FROM license_activations WHERE license_id = :lid ORDER BY activated_at DESC LIMIT 1"),
+        {"lid": license_id}
+    ).first()
+    return row[0] if row else None
 
 @app.post("/webhook/payment")
 async def webhook_payment(payload: PaymentWebhook, request: Request):
@@ -154,9 +182,28 @@ async def activate_license(req: ActivationRequest):
         if status in ('revoked', 'expired'):
             raise HTTPException(status_code=400, detail="License is not valid")
 
+        # get last activation terminal (if any)
+        last_terminal = _get_last_activation_terminal(session, license_id)
+
         if activated:
-            # optionally allow re-activation or return an error
-            return {"ok": False, "message": "License already activated"}
+            # If already activated, only allow activation from the same terminal.
+            if last_terminal and last_terminal != req.terminal_id:
+                # License has been activated on another terminal -> block.
+                raise HTTPException(status_code=400, detail="License already activated on another terminal")
+            else:
+                # Same terminal re-activation: log an activation event and refresh activated_at
+                session.execute(sa.text(
+                    "INSERT INTO license_activations (license_id, terminal_id, activated_at) VALUES (:lid, :tid, now())"
+                ), {"lid": license_id, "tid": req.terminal_id})
+                session.execute(sa.text(
+                    "UPDATE licenses SET activated = true, activated_at = now() WHERE id = :lid"
+                ), {"lid": license_id})
+                session.commit()
+                return {"ok": True, "message": "License re-activated for same terminal"}
+
+        # Not activated yet: if there's a recorded terminal (rare) that differs, block to be safe
+        if last_terminal and last_terminal != req.terminal_id:
+            raise HTTPException(status_code=400, detail="License has previous activation on a different terminal and cannot be activated here")
 
         # record activation
         session.execute(sa.text(
@@ -174,6 +221,7 @@ async def activate_license(req: ActivationRequest):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
+
 @app.get("/licenses/verify/{license_key}")
 async def verify_license(license_key: str):
     session = SessionLocal()

@@ -32,17 +32,28 @@ SessionLocal = sessionmaker(bind=engine)
 
 # --- Replace the key-loading block with this (or add below existing load functions) ---
 
-def load_private_key_from_file(path: str):
+# --- key loading block: prefer env vars, fallback to files ---
+def _read_file_bytes(path: str):
     with open(path, "rb") as f:
         return f.read()
 
-def load_public_key_from_file(path: str):
-    with open(path, "rb") as f:
-        return f.read()
-
-# Prefer explicit env vars with key text (PRIVATE_KEY / PUBLIC_KEY), fallback to file paths
-PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY")  # raw PEM text allowed
+PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY")
 PUBLIC_KEY_ENV = os.getenv("PUBLIC_KEY")
+
+if PRIVATE_KEY_ENV:
+    PRIVATE_KEY = PRIVATE_KEY_ENV.encode()
+else:
+    if not PRIVATE_KEY_PATH:
+        raise RuntimeError("Set PRIVATE_KEY (env) or PRIVATE_KEY_PATH (env) in environment")
+    PRIVATE_KEY = _read_file_bytes(PRIVATE_KEY_PATH)
+
+if PUBLIC_KEY_ENV:
+    PUBLIC_KEY = PUBLIC_KEY_ENV.encode()
+else:
+    if not PUBLIC_KEY_PATH:
+        raise RuntimeError("Set PUBLIC_KEY (env) or PUBLIC_KEY_PATH (env) in environment")
+    PUBLIC_KEY = _read_file_bytes(PUBLIC_KEY_PATH)
+# ---
 
 if PRIVATE_KEY_ENV:
     # If user supplied the key as env var, accept bytes or str

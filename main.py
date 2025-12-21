@@ -14,19 +14,50 @@ from generate_keys import generate_license_key
 
 load_dotenv()
 
-# Required environment variables
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set")
 
-if not PRIVATE_KEY:
-    raise RuntimeError("PRIVATE_KEY is not set")
+# --- Required env vars ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY")
+PUBLIC_KEY_ENV = os.getenv("PUBLIC_KEY")
+ISSUER = os.getenv("ISSUER", "Reed POS Technologies")
+TW_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TW_FROM = os.getenv("TWILIO_FROM")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
-if not PUBLIC_KEY:
-    raise RuntimeError("PUBLIC_KEY is not set")
+# Ensure critical variables exist
+if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):
+    raise RuntimeError("Set DATABASE_URL, PRIVATE_KEY, and PUBLIC_KEY in .env or Render environment")
 
-# Convert RSA keys to bytes (required by crypto libraries)
-PRIVATE_KEY = PRIVATE_KEY.encode()
-PUBLIC_KEY = PUBLIC_KEY.encode()
+# --- SQLAlchemy setup ---
+engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
+SessionLocal = sessionmaker(bind=engine)
+
+# --- Key loading helpers ---
+def load_key_from_file(path: str):
+    with open(path, "rb") as f:
+        return f.read()
+
+# Prefer env var first (raw PEM), fallback to file path if needed
+if PRIVATE_KEY_ENV:
+    PRIVATE_KEY = PRIVATE_KEY_ENV.encode() if isinstance(PRIVATE_KEY_ENV, str) else PRIVATE_KEY_ENV
+else:
+    PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
+    if not PRIVATE_KEY_PATH:
+        raise RuntimeError("Provide PRIVATE_KEY env var or PRIVATE_KEY_PATH")
+    PRIVATE_KEY = load_key_from_file(PRIVATE_KEY_PATH)
+
+if PUBLIC_KEY_ENV:
+    PUBLIC_KEY = PUBLIC_KEY_ENV.encode() if isinstance(PUBLIC_KEY_ENV, str) else PUBLIC_KEY_ENV
+else:
+    PUBLIC_KEY_PATH = os.getenv("PUBLIC_KEY_PATH")
+    if not PUBLIC_KEY_PATH:
+        raise RuntimeError("Provide PUBLIC_KEY env var or PUBLIC_KEY_PATH")
+    PUBLIC_KEY = load_key_from_file(PUBLIC_KEY_PATH)
+
+# --- Twilio client ---
+twilio_client = TwilioClient(TW_SID, TW_TOKEN) if TW_SID and TW_TOKEN else None
+
 
 # Ensure tables exist (run schema.sql separately in prod; quick create here for demo)
 if os.getenv("INIT_DB", "false").lower() == "true":

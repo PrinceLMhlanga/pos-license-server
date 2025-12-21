@@ -27,23 +27,28 @@ CREATE TABLE IF NOT EXISTS licenses (
   metadata JSONB
 );
 
--- sms queue
+-- sms/email queue (notifications/messages)
 CREATE TABLE IF NOT EXISTS sms_messages (
   id SERIAL PRIMARY KEY,
-  phone TEXT NOT NULL,
+  phone TEXT,                             -- allow NULL for email-only messages
   email TEXT,
   message TEXT NOT NULL,
-  method TEXT DEFAULT 'sms',
+  method TEXT DEFAULT 'sms',               -- 'sms' or 'email'
   license_id INT REFERENCES licenses(id),
-  status TEXT NOT NULL DEFAULT 'queued',
+  status TEXT NOT NULL DEFAULT 'queued',   -- queued | sending | sent | failed
   attempts INT DEFAULT 0,
   last_attempt_at TIMESTAMPTZ,
-  response_json JSONB,
+  sent_at TIMESTAMPTZ,                    -- timestamp when successfully sent
+  response_json JSONB,                    -- provider response or error info
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_sms_messages_status ON sms_messages(status);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_created_at ON sms_messages(created_at);
+
 CREATE TABLE IF NOT EXISTS license_activations (
-    id SERIAL PRIMARY KEY,
-    license_id INT REFERENCES licenses(id),
-    terminal_id TEXT NOT NULL,
-    activated_at TIMESTAMPTZ DEFAULT now()
+  id SERIAL PRIMARY KEY,
+  license_id INT REFERENCES licenses(id),
+  terminal_id TEXT NOT NULL,
+  activated_at TIMESTAMPTZ DEFAULT now()
 );

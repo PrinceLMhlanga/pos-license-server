@@ -23,7 +23,7 @@ ISSUER = os.getenv("ISSUER", "Reed POS Technologies")
 TW_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TW_FROM = os.getenv("TWILIO_FROM")
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("BASE_URL", "https://pos-license-server.onrender.com")
 
 # Ensure critical variables exist
 if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):

@@ -14,65 +14,19 @@ from generate_keys import generate_license_key
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
-PUBLIC_KEY_PATH = os.getenv("PUBLIC_KEY_PATH")
-ISSUER = os.getenv("ISSUER", "Reed POS Technologies")
-TW_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TW_FROM = os.getenv("TWILIO_FROM")
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+# Required environment variables
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
 
-if not all([DATABASE_URL, PRIVATE_KEY_PATH, PUBLIC_KEY_PATH]):
-    raise RuntimeError("Set DATABASE_URL and PRIVATE_KEY_PATH and PUBLIC_KEY_PATH in .env")
+if not PRIVATE_KEY:
+    raise RuntimeError("PRIVATE_KEY is not set")
 
-# DB setup (sync SQLAlchemy for simplicity)
-engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
-SessionLocal = sessionmaker(bind=engine)
+if not PUBLIC_KEY:
+    raise RuntimeError("PUBLIC_KEY is not set")
 
-# --- Replace the key-loading block with this (or add below existing load functions) ---
-
-# --- key loading block: prefer env vars, fallback to files ---
-def _read_file_bytes(path: str):
-    with open(path, "rb") as f:
-        return f.read()
-
-PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY")
-PUBLIC_KEY_ENV = os.getenv("PUBLIC_KEY")
-
-if PRIVATE_KEY_ENV:
-    PRIVATE_KEY = PRIVATE_KEY_ENV.encode()
-else:
-    if not PRIVATE_KEY_PATH:
-        raise RuntimeError("Set PRIVATE_KEY (env) or PRIVATE_KEY_PATH (env) in environment")
-    PRIVATE_KEY = _read_file_bytes(PRIVATE_KEY_PATH)
-
-if PUBLIC_KEY_ENV:
-    PUBLIC_KEY = PUBLIC_KEY_ENV.encode()
-else:
-    if not PUBLIC_KEY_PATH:
-        raise RuntimeError("Set PUBLIC_KEY (env) or PUBLIC_KEY_PATH (env) in environment")
-    PUBLIC_KEY = _read_file_bytes(PUBLIC_KEY_PATH)
-# ---
-
-if PRIVATE_KEY_ENV:
-    # If user supplied the key as env var, accept bytes or str
-    PRIVATE_KEY = PRIVATE_KEY_ENV.encode() if isinstance(PRIVATE_KEY_ENV, str) else PRIVATE_KEY_ENV
-else:
-    # fallback to path
-    if not PRIVATE_KEY_PATH:
-        raise RuntimeError("Set PRIVATE_KEY (env) or PRIVATE_KEY_PATH (env) in .env / Render environment")
-    PRIVATE_KEY = load_private_key_from_file(PRIVATE_KEY_PATH)
-
-if PUBLIC_KEY_ENV:
-    PUBLIC_KEY = PUBLIC_KEY_ENV.encode() if isinstance(PUBLIC_KEY_ENV, str) else PUBLIC_KEY_ENV
-else:
-    if not PUBLIC_KEY_PATH:
-        raise RuntimeError("Set PUBLIC_KEY (env) or PUBLIC_KEY_PATH (env) in .env / Render environment")
-    PUBLIC_KEY = load_public_key_from_file(PUBLIC_KEY_PATH)
-# ---
-# Twilio client
-twilio_client = TwilioClient(TW_SID, TW_TOKEN) if TW_SID and TW_TOKEN else None
+# Convert RSA keys to bytes (required by crypto libraries)
+PRIVATE_KEY = PRIVATE_KEY.encode()
+PUBLIC_KEY = PUBLIC_KEY.encode()
 
 # Ensure tables exist (run schema.sql separately in prod; quick create here for demo)
 if os.getenv("INIT_DB", "false").lower() == "true":

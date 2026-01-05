@@ -175,7 +175,7 @@ async def webhook_payment(payload: PaymentWebhook, request: Request):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
-app = FastAPI()
+
 
 @app.post("/send-all-emails/")
 async def send_all_emails(background_tasks: BackgroundTasks):

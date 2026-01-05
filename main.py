@@ -60,9 +60,20 @@ twilio_client = TwilioClient(TW_SID, TW_TOKEN) if TW_SID and TW_TOKEN else None
 
 
 # Ensure tables exist (run schema.sql separately in prod; quick create here for demo)
+from pathlib import Path
+
+# Ensure tables exist (one-time init)
 if os.getenv("INIT_DB", "false").lower() == "true":
+    schema_path = Path(__file__).parent / "schema.sql"
+
+    if not schema_path.exists():
+        raise RuntimeError(f"schema.sql not found at {schema_path}")
+
     with engine.begin() as conn:
-        conn.execute(sa.text(open("schema.sql").read()))
+        conn.execute(sa.text(schema_path.read_text()))
+
+    print("✅ Database schema created successfully")
+
 
 app = FastAPI(title="License backend")
 

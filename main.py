@@ -8,6 +8,9 @@ import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 from twilio.rest import Client as TwilioClient
 from typing import Optional
+from fastapi import FastAPI, BackgroundTasks
+from worker import process_all_messages
+
 
 # import your short key generator
 from generate_keys import generate_license_key
@@ -172,7 +175,15 @@ async def webhook_payment(payload: PaymentWebhook, request: Request):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
+app = FastAPI()
 
+@app.post("/send-all-emails/")
+async def send_all_emails(background_tasks: BackgroundTasks):
+    """
+    Process all queued emails in the database in the background.
+    """
+    background_tasks.add_task(process_all_messages)
+    return {"message": "All queued emails will be processed in the background."}
 
 @app.post("/licenses/activate")
 async def activate_license(req: ActivationRequest):

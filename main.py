@@ -8,8 +8,9 @@ import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 from twilio.rest import Client as TwilioClient
 from typing import Optional
-from fastapi import FastAPI, BackgroundTasks
-from worker import process_all_messages
+from fastapi import BackgroundTasks
+from worker import load_private_key, generate_license_jwt, SessionLocal, process_all_messages
+
 
 
 # import your short key generator
@@ -175,7 +176,31 @@ async def webhook_payment(payload: PaymentWebhook, request: Request):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
+        
+@app.post("/payment-complete/")
+async def payment_complete(email: str, product_sku: str, order_id: int, background_tasks: BackgroundTasks):
+    """
+    Called automatically when payment succeeds.
+    Generates license, queues email, triggers background sending with retries.
+    """
+    # 1️⃣ Generate license token
+    license_token = generate_license_jwt(PRIVATE_KEY, license_id=order_id,
+                                         product_sku=product_sku, order_id=order_id,
+                                         issuer=ISSUER, expires_days=365)
 
+    # 2️⃣ Queue the email
+    session = SessionLocal()
+    session.execute(sa.text("""
+        INSERT INTO sms_messages (email, message, method, status, attempts, created_at)
+        VALUES (:email, :message, 'email', 'queued', 0, now())
+    """), {"email": email, "message": f"Here is your license: {license_token}"})
+    session.commit()
+    session.close()
+
+    # 3️⃣ Trigger background sending with automatic retries
+    background_tasks.add_task(process_all_messages)
+
+    return {"message": "Payment successful! License email will be sent automatically."}
 
 @app.post("/send-all-emails/")
 async def send_all_emails(background_tasks: BackgroundTasks):

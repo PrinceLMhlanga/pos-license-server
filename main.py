@@ -131,25 +131,12 @@ async def webhook_payment(payload: PaymentWebhook, request: Request):
         order_id = order_row[0]
         session.commit()
         # 🔐 Notify Render main.py to send email
-try:
-    requests.post(
-        f"{os.getenv('MAIN_APP_URL')}/internal/payment-confirmed",
-        headers={
-            "X-Internal-Secret": os.getenv("INTERNAL_SECRET"),
-            "Content-Type": "application/json"
-        },
-        json={
-            "email": payload.customer_email,
-            "name": payload.customer_email,  # or real name if available
-            "license_key": license_key,
-            "order_id": payload.provider_order_id,
-            "plan": payload.product_sku
-        },
-        timeout=10
-    )
-except Exception as e:
-    # IMPORTANT: do NOT fail payment if email fails
-    print("Email trigger failed:", e)
+    session.close()
+
+    # 🔥 THIS triggers worker.py
+    background_tasks.add_task(process_all_messages)
+
+    return {"ok": True}
 
 
         # generate a short unique license_key and insert license row including the key (to satisfy NOT NULL)

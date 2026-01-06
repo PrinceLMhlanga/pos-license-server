@@ -22,7 +22,7 @@ if not DATABASE_URL:
 MAX_ATTEMPTS = int(os.getenv("MAX_ATTEMPTS", 5))
 RETRY_INTERVAL = float(os.getenv("RETRY_INTERVAL", 5.0))  # seconds between retries
 
-# ---------- Database ----------
+# -------- Database ----------
 engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=engine)
 

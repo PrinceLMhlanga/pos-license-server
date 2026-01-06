@@ -3,13 +3,12 @@ import os
 import time
 import json
 import logging
-import smtplib
-from email.mime.text import MIMEText
 from typing import Optional
 import jwt
 import sqlalchemy as sa
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from mailjet_rest import Client  # <-- Mailjet official SDK
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -27,48 +26,55 @@ RETRY_INTERVAL = float(os.getenv("RETRY_INTERVAL", 5.0))  # seconds between retr
 engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=engine)
 
-# ---------- Email ----------
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
-EMAIL_FROM = os.getenv("EMAIL_FROM", EMAIL_USER)
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes")
+# ---------- Mailjet Email ----------
+MAILJET_API_KEY = os.getenv('MAILJET_API_KEY')
+MAILJET_API_SECRET = os.getenv('MAILJET_API_SECRET')
+MAILJET_FROM = os.getenv('MAILJET_FROM')  # Should be a Mailjet-verified sender or your Gmail
 
-if not (EMAIL_USER and EMAIL_PASS):
-    logging.warning("Email credentials not fully configured. Emails will fail until configured.")
+if not all([MAILJET_API_KEY, MAILJET_API_SECRET, MAILJET_FROM]):
+    logging.warning("Mailjet config missing! Emails will fail until configured.")
 
-
-# ---------- Email function ----------
+# ---------- Email function (using Mailjet) ----------
 def send_email(to_email: str, subject: str, body: str, timeout=20):
-    """Send an email via SMTP."""
-    if not (EMAIL_USER and EMAIL_PASS):
-        return False, "SMTP credentials not configured"
-
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["From"] = EMAIL_FROM
-    msg["To"] = to_email
-    msg["Subject"] = subject
-
+    """Send an email via Mailjet transactional API."""
+    if not all([MAILJET_API_KEY, MAILJET_API_SECRET, MAILJET_FROM]):
+        return False, "Mailjet API credentials/config missing"
     try:
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=timeout) as server:
-            server.ehlo()
-            if EMAIL_USE_TLS:
-                server.starttls()
-                server.ehlo()
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.send_message(msg)
-        return True, "Sent"
+        mailjet = Client(auth=(MAILJET_API_KEY, MAILJET_API_SECRET), version='v3.1')
+        data = {
+            'Messages': [
+                {
+                    "From": {
+                        "Email": MAILJET_FROM,
+                        "Name": "POS License"
+                    },
+                    "To": [
+                        {
+                            "Email": to_email,
+                            "Name": to_email.split("@")[0]
+                        }
+                    ],
+                    "Subject": subject,
+                    "TextPart": body,
+                    # "HTMLPart": "<strong>%s</strong>" % body,  # optional HTML
+                }
+            ]
+        }
+        result = mailjet.send.create(data=data)
+        # Mailjet's transactional send returns 200 for success
+        if result.status_code == 200:
+            return True, "Sent"
+        else:
+            logging.error(f"Mailjet error [{result.status_code}]: {result.json()}")
+            return False, str(result.json())
     except Exception as e:
-        logging.exception("send_email error")
+        logging.exception("Mailjet send_email error")
         return False, str(e)
-
 
 # ---------- JWT license functions ----------
 def load_private_key(path: str) -> bytes:
     with open(path, "rb") as f:
         return f.read()
-
 
 def generate_license_jwt(private_key_pem: bytes, license_id: int, product_sku: str, order_id: int,
                          issuer: str, expires_days: Optional[int] = None) -> str:
@@ -85,7 +91,6 @@ def generate_license_jwt(private_key_pem: bytes, license_id: int, product_sku: s
         payload["exp"] = now + expires_days * 24 * 3600
     token = jwt.encode(payload, private_key_pem, algorithm="RS256")
     return token
-
 
 # ---------- Queue processing with automatic retries ----------
 def process_all_messages():

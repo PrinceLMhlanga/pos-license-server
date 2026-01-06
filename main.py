@@ -10,7 +10,7 @@ from twilio.rest import Client as TwilioClient
 from typing import Optional
 from fastapi import BackgroundTasks
 from worker import load_private_key, generate_license_jwt, SessionLocal, process_all_messages
-
+import requests
 
 
 # import your short key generator
@@ -28,6 +28,7 @@ TW_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TW_FROM = os.getenv("TWILIO_FROM")
 BASE_URL = os.getenv("BASE_URL", "https://pos-license-server.onrender.com")
+INTERNAL_SECRET=9c3f4a8e5b7d2f1a0e6c9d8b4f2a7e1c
 
 # Ensure critical variables exist
 if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):
@@ -129,6 +130,27 @@ async def webhook_payment(payload: PaymentWebhook, request: Request):
             raise RuntimeError("Failed to create order")
         order_id = order_row[0]
         session.commit()
+        # 🔐 Notify Render main.py to send email
+try:
+    requests.post(
+        f"{os.getenv('MAIN_APP_URL')}/internal/payment-confirmed",
+        headers={
+            "X-Internal-Secret": os.getenv("INTERNAL_SECRET"),
+            "Content-Type": "application/json"
+        },
+        json={
+            "email": payload.customer_email,
+            "name": payload.customer_email,  # or real name if available
+            "license_key": license_key,
+            "order_id": payload.provider_order_id,
+            "plan": payload.product_sku
+        },
+        timeout=10
+    )
+except Exception as e:
+    # IMPORTANT: do NOT fail payment if email fails
+    print("Email trigger failed:", e)
+
 
         # generate a short unique license_key and insert license row including the key (to satisfy NOT NULL)
         # pick who it is issued to (email if available else phone)
@@ -300,3 +322,38 @@ async def verify_license(license_key: str):
 async def public_key():
     # client can download embedded public key (or bundle in installer)
     return {"public_key": PUBLIC_KEY.decode() if isinstance(PUBLIC_KEY, (bytes, bytearray)) else PUBLIC_KEY}
+
+# main.py (Render)
+
+
+app = Flask(__name__)
+
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+
+@app.route("/internal/payment-confirmed", methods=["POST"])
+def payment_confirmed():
+    auth = request.headers.get("X-Internal-Secret")
+    if auth != INTERNAL_SECRET:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data = request.json or {}
+
+    email = data.get("email")
+    name = data.get("name")
+    license_key = data.get("license_key")
+    order_id = data.get("order_id")
+    plan = data.get("plan")
+
+    if not all([email, license_key, order_id]):
+        return jsonify({"error": "Missing data"}), 400
+
+    send_license_email(
+        email=email,
+        name=name,
+        license_key=license_key,
+        order_id=order_id,
+        plan=plan
+    )
+
+    return jsonify({"success": True}), 200
+

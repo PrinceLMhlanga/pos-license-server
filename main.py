@@ -93,6 +93,26 @@ def start_paynow_payment(req: StartPaynowRequest):
             "reference": response.poll_url.split('/')[-1],
         }
     raise HTTPException(status_code=400, detail=f"Paynow initiation failed: {response.errors}")
+@app.get("/orders/by-reference/{reference}")
+async def get_license_by_reference(reference: str):
+    session = SessionLocal()
+    try:
+        row = session.execute(sa.text("""
+            SELECT l.license_key
+            FROM orders o
+            JOIN licenses l ON l.order_id = o.id
+            WHERE o.provider_order_id = :ref
+        """), {"ref": reference}).first()
+
+        if not row:
+            return {"ok": False}
+
+        return {
+            "ok": True,
+            "license": row.license_key
+        }
+    finally:
+        session.close()
 
 # --- PAYMENT WEBHOOK: where your Flask server POSTs successful payment ---
 @app.post("/webhook/payment")

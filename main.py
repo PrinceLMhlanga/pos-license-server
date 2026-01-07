@@ -109,6 +109,7 @@ def start_paynow_payment(req: StartPaynowRequest):
         response = paynow.send(payment)
 
         if not response.success:
+            print("PAYNOW ERROR:", response.errors) 
             raise HTTPException(
                 status_code=400,
                 detail=f"Paynow initiation failed: {response.errors}"

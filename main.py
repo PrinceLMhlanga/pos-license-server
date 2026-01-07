@@ -9,8 +9,9 @@ from sqlalchemy.orm import sessionmaker
 from typing import Optional
 from worker import load_private_key, generate_license_jwt, SessionLocal, process_all_messages
 from generate_keys import generate_license_key
-
+from paynow import Paynow
 load_dotenv()
+router = APIRouter()
 
 # --- ENVIRONMENT VARIABLES ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -22,6 +23,25 @@ TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TW_FROM = os.getenv("TWILIO_FROM")
 BASE_URL = os.getenv("BASE_URL", "https://pos-license-server.onrender.com")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
+PAYNOW_INTEGRATION_ID = os.getenv("PAYNOW_INTEGRATION_ID")
+PAYNOW_INTEGRATION_KEY = os.getenv("PAYNOW_INTEGRATION_KEY")
+PAYNOW_RETURN_URL = os.getenv("PAYNOW_RETURN_URL", "https://pos-license-server.onrender.com/payment/return") # not strictly needed
+PAYNOW_RESULT_URL = os.getenv("PAYNOW_RESULT_URL", "https://pos-license-server.onrender.com/webhook/payment") # this is the webhook
+
+paynow = Paynow(
+    PAYNOW_INTEGRATION_ID,
+    PAYNOW_INTEGRATION_KEY,
+    PAYNOW_RETURN_URL,
+    PAYNOW_RESULT_URL
+)
+
+class StartPaynowRequest(BaseModel):
+    email: str = None
+    phone: str = None
+    product: str
+    amount: float
+
+
 
 if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):
     raise RuntimeError("Set DATABASE_URL, PRIVATE_KEY, and PUBLIC_KEY in environment or .env")
@@ -59,6 +79,20 @@ def _get_last_activation_terminal(session, license_id):
         {"lid": license_id}
     ).first()
     return row[0] if row else None
+@router.post("/paynow/start")
+def start_paynow_payment(req: StartPaynowRequest):
+    payment = paynow.create_payment(f"{req.email or req.phone}-{req.product}", req.email or "buyer@unknown.com")
+    payment.add(req.product, req.amount)
+    if req.phone:
+        payment.paynow_mobile = req.phone
+    response = paynow.send(payment)
+    if response.success:
+        return {
+            "redirect_url": response.redirect_url,
+            "poll_url": response.poll_url,
+            "reference": response.poll_url.split('/')[-1],
+        }
+    raise HTTPException(status_code=400, detail=f"Paynow initiation failed: {response.errors}")
 
 # --- PAYMENT WEBHOOK: where your Flask server POSTs successful payment ---
 @app.post("/webhook/payment")
@@ -225,3 +259,5 @@ async def verify_license(license_key: str):
 @app.get("/public_key")
 async def public_key():
     return {"public_key": PUBLIC_KEY.decode() if isinstance(PUBLIC_KEY, (bytes, bytearray)) else PUBLIC_KEY}
+# at bottom of main.py
+app.include_router(router)

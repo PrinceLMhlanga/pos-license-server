@@ -81,18 +81,50 @@ def _get_last_activation_terminal(session, license_id):
     return row[0] if row else None
 @router.post("/paynow/start")
 def start_paynow_payment(req: StartPaynowRequest):
-    payment = paynow.create_payment(f"{req.email or req.phone}-{req.product}", req.email or "buyer@unknown.com")
-    payment.add(req.product, req.amount)
-    if req.phone:
-        payment.paynow_mobile = req.phone
-    response = paynow.send(payment)
-    if response.success:
+    try:
+        if not req.email and not req.phone:
+            raise HTTPException(
+                status_code=400,
+                detail="Email or phone number is required"
+            )
+
+        # Create Paynow payment
+        payment = paynow.create_payment(
+            reference=f"{(req.email or req.phone)}-{req.product}",
+            email=req.email or "buyer@unknown.com"
+        )
+
+        # Add item (currency MUST match your Paynow account)
+        payment.add(
+            req.product,
+            float(req.amount),
+            currency="USD"
+        )
+
+        # Mobile payment (EcoCash / OneMoney)
+        if req.phone:
+            payment.paynow_mobile = req.phone
+
+        # Send payment to Paynow
+        response = paynow.send(payment)
+
+        if not response.success:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Paynow initiation failed: {response.errors}"
+            )
+
         return {
             "redirect_url": response.redirect_url,
             "poll_url": response.poll_url,
-            "reference": response.poll_url.split('/')[-1],
+            "reference": response.poll_url.split("/")[-1]
         }
-    raise HTTPException(status_code=400, detail=f"Paynow initiation failed: {response.errors}")
+
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=str(ex))
+
 @app.get("/orders/by-reference/{reference}")
 async def get_license_by_reference(reference: str):
     session = SessionLocal()

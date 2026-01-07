@@ -9,5 +9,6 @@ cryptography
 alembic  # optional: remove if you don't use migration
 mailjet-rest
 paynow
+requests
 
 

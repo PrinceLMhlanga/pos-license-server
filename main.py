@@ -81,23 +81,24 @@ def _get_last_activation_terminal(session, license_id):
     return row[0] if row else None
 @router.post("/paynow/start")
 def start_paynow_payment(req: StartPaynowRequest):
+    print("=== /paynow/start HIT ===")
+    print("REQ:", req)
+
     try:
-        if not req.email:
-            raise HTTPException(status_code=400, detail="Email is required")
-
+        print("Creating payment object...")
         payment = paynow.create_payment(
-            reference=f"{req.email}-{req.product}",
-            email=req.email
+            reference="TEST-REF",
+            email=req.email or "test@example.com"
         )
+        print("Payment object created:", payment)
 
-        # Paynow SDK DOES NOT accept currency here
-        payment.add(req.product, float(req.amount))
+        print("Adding item...")
+        payment.add("TEST_PRODUCT", float(req.amount))
+        print("Item added")
 
-        # Mobile payment (optional – add AFTER this works)
-        if req.phone:
-            payment.paynow_mobile = req.phone
-
+        print("Sending to Paynow...")
         response = paynow.send(payment)
+        print("Paynow response:", response)
 
         if not response.success:
             print("PAYNOW ERROR:", response.errors)
@@ -109,10 +110,10 @@ def start_paynow_payment(req: StartPaynowRequest):
             "reference": response.poll_url.split("/")[-1]
         }
 
-    except HTTPException:
-        raise
     except Exception as ex:
-        print("START PAYNOW ERROR:", ex)
+        import traceback
+        print("🔥 PAYNOW START CRASH 🔥")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
 
 @app.get("/orders/by-reference/{reference}")

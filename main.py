@@ -81,40 +81,40 @@ def _get_last_activation_terminal(session, license_id):
     return row[0] if row else None
 @router.post("/paynow/start")
 def start_paynow_payment(req: StartPaynowRequest):
-    print("=== /paynow/start HIT ===")
-    print("REQ:", req)
-
     try:
-        print("Creating payment object...")
+        reference = f"POS-{int(time.time())}"
+
         payment = paynow.create_payment(
-            reference="TEST-REF",
-            email=req.email or "test@example.com"
+            reference,
+            req.email or "buyer@swiftpos.co.zw"
         )
-        print("Payment object created:", payment)
 
-        print("Adding item...")
-        payment.add("TEST_PRODUCT", float(req.amount))
-        print("Item added")
+        payment.add(req.product, float(req.amount))
 
-        print("Sending to Paynow...")
+        # optional mobile hint
+        if req.phone:
+            payment.paynow_mobile = req.phone
+
         response = paynow.send(payment)
-        print("Paynow response:", response)
 
         if not response.success:
-            print("PAYNOW ERROR:", response.errors)
-            raise HTTPException(status_code=400, detail=str(response.errors))
+            raise HTTPException(
+                status_code=400,
+                detail=response.errors
+            )
 
         return {
+            "ok": True,
             "redirect_url": response.redirect_url,
             "poll_url": response.poll_url,
-            "reference": response.poll_url.split("/")[-1]
+            "reference": reference
         }
 
     except Exception as ex:
         import traceback
-        print("🔥 PAYNOW START CRASH 🔥")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
+
 
 @app.get("/orders/by-reference/{reference}")
 async def get_license_by_reference(reference: str):

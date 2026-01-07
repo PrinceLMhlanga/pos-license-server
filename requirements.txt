@@ -6,7 +6,8 @@ psycopg2-binary
 pydantic
 twilio
 cryptography
-alembic  # optional: remove if you don't use migrations
+alembic  # optional: remove if you don't use migration
 mailjet-rest
 paynow
+
 

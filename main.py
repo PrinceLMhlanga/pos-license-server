@@ -82,38 +82,26 @@ def _get_last_activation_terminal(session, license_id):
 @router.post("/paynow/start")
 def start_paynow_payment(req: StartPaynowRequest):
     try:
-        if not req.email and not req.phone:
-            raise HTTPException(
-                status_code=400,
-                detail="Email or phone number is required"
-            )
+        if not req.email:
+            raise HTTPException(status_code=400, detail="Email is required")
 
-        # Create Paynow payment
         payment = paynow.create_payment(
-            reference=f"{(req.email or req.phone)}-{req.product}",
-            email=req.email or "buyer@unknown.com"
+            reference=f"{req.email}-{req.product}",
+            email=req.email
         )
 
-        # Add item (currency MUST match your Paynow account)
-        payment.add(
-            req.product,
-            float(req.amount),
-            currency="USD"
-        )
+        # Paynow SDK DOES NOT accept currency here
+        payment.add(req.product, float(req.amount))
 
-        # Mobile payment (EcoCash / OneMoney)
+        # Mobile payment (optional – add AFTER this works)
         if req.phone:
             payment.paynow_mobile = req.phone
 
-        # Send payment to Paynow
         response = paynow.send(payment)
 
         if not response.success:
-            print("PAYNOW ERROR:", response.errors) 
-            raise HTTPException(
-                status_code=400,
-                detail=f"Paynow initiation failed: {response.errors}"
-            )
+            print("PAYNOW ERROR:", response.errors)
+            raise HTTPException(status_code=400, detail=str(response.errors))
 
         return {
             "redirect_url": response.redirect_url,
@@ -124,6 +112,7 @@ def start_paynow_payment(req: StartPaynowRequest):
     except HTTPException:
         raise
     except Exception as ex:
+        print("START PAYNOW ERROR:", ex)
         raise HTTPException(status_code=500, detail=str(ex))
 
 @app.get("/orders/by-reference/{reference}")

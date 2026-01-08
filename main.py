@@ -141,6 +141,22 @@ def paypal_get_order(order_id):
     )
     r.raise_for_status()
     return r.json()
+
+def paypal_capture_order(order_id: str):
+    access_token = paypal_headers()
+
+    r = requests.post(
+        f"{PAYPAL_BASE_URL}/v2/checkout/orders/{order_id}/capture",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        timeout=10
+    )
+
+    r.raise_for_status()
+    return r.json()
+
 def paynow_check_status(reference):
     status = paynow.poll_transaction(reference)
     return status.status  # e.g. "Paid", "Awaiting Delivery"
@@ -208,28 +224,35 @@ def check_payment(req: PaymentCheckRequest):
             )
 
             return {"ok": True, "license": license_key}
+# ---- PAYPAL ----
+if provider == "paypal":
+    order = paypal_get_order(req.reference)
 
-        # ---- PAYPAL ----
-        if provider == "paypal":
-            order = paypal_get_order(req.reference)
+    # If user has not approved yet
+    if order["status"] == "CREATED":
+        return {"ok": False, "status": "WAITING_FOR_APPROVAL"}
 
-            if order["status"] != "COMPLETED":
-                return {"ok": False, "status": order["status"]}
+    # If approved but not captured → CAPTURE NOW
+    if order["status"] == "APPROVED":
+        order = paypal_capture_order(req.reference)
 
-            pu = order["purchase_units"][0]
-            capture = pu["payments"]["captures"][0]
+    if order["status"] != "COMPLETED":
+        return {"ok": False, "status": order["status"]}
 
-            if capture["status"] != "COMPLETED":
-                return {"ok": False, "status": capture["status"]}
+    pu = order["purchase_units"][0]
+    capture = pu["payments"]["captures"][0]
 
-            license_key = issue_license_for_order(
-                session=session,
-                provider="paypal",
-                provider_order_id=req.reference,
-                product="SWIFTPOS_SINGLE"
-            )
+    if capture["status"] != "COMPLETED":
+        return {"ok": False, "status": capture["status"]}
 
-            return {"ok": True, "license": license_key}
+    license_key = issue_license_for_order(
+        session=session,
+        provider="paypal",
+        provider_order_id=req.reference,
+        product="SWIFTPOS_SINGLE"
+    )
+
+    return {"ok": True, "license": license_key}
 
         raise HTTPException(status_code=400, detail="Unknown provider")
 

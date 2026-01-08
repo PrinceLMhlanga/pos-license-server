@@ -11,6 +11,8 @@ from typing import Optional
 from worker import load_private_key, generate_license_jwt, SessionLocal, process_all_messages
 from generate_keys import generate_license_key
 from paynow import Paynow
+import requests
+from requests.auth import HTTPBasicAuth
 load_dotenv()
 router = APIRouter()
 
@@ -44,21 +46,17 @@ class StartPaynowRequest(BaseModel):
     phone: str = None
     product: str
     amount: float
-def paypal_headers():
-    auth = f"{PAYPAL_CLIENT_ID}:{PAYPAL_SECRET}"
-    token = base64.b64encode(auth.encode()).decode()
 
+def paypal_headers():
     r = requests.post(
         f"{PAYPAL_BASE_URL}/v1/oauth2/token",
-        headers={
-            "Authorization": f"Basic {token}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        auth=HTTPBasicAuth(PAYPAL_CLIENT_ID, PAYPAL_SECRET),
         data={"grant_type": "client_credentials"},
         timeout=10
     )
     r.raise_for_status()
     return r.json()["access_token"]
+
 
 
 

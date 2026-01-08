@@ -41,6 +41,21 @@ class StartPaynowRequest(BaseModel):
     phone: str = None
     product: str
     amount: float
+def paypal_headers():
+    auth = f"{PAYPAL_CLIENT_ID}:{PAYPAL_CLIENT_SECRET}"
+    token = base64.b64encode(auth.encode()).decode()
+
+    r = requests.post(
+        f"{PAYPAL_BASE_URL}/v1/oauth2/token",
+        headers={
+            "Authorization": f"Basic {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={"grant_type": "client_credentials"},
+        timeout=10
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
 
 
 
@@ -116,6 +131,46 @@ def start_paynow_payment(req: StartPaynowRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
 
+@router.post("/paypal/start")
+def start_paypal_payment(req: StartPaynowRequest):
+    access_token = paypal_headers()
+
+    order = {
+        "intent": "CAPTURE",
+        "purchase_units": [{
+            "amount": {
+                "currency_code": PAYPAL_CURRENCY,
+                "value": f"{req.amount:.2f}"
+            },
+            "description": req.product
+        }],
+        "application_context": {
+            "return_url": f"{BASE_URL}/payment/return",
+            "cancel_url": f"{BASE_URL}/payment/cancel"
+        }
+    }
+
+    r = requests.post(
+        f"{PAYPAL_BASE_URL}/v2/checkout/orders",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        json=order,
+        timeout=10
+    )
+    r.raise_for_status()
+
+    data = r.json()
+    approval_url = next(
+        link["href"] for link in data["links"]
+        if link["rel"] == "approve"
+    )
+
+    return {
+        "redirect_url": approval_url,
+        "order_id": data["id"]
+    }
 
 @app.get("/orders/by-reference/{reference}")
 async def get_license_by_reference(reference: str):

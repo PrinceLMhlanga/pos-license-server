@@ -28,6 +28,9 @@ PAYNOW_INTEGRATION_ID = os.getenv("PAYNOW_INTEGRATION_ID")
 PAYNOW_INTEGRATION_KEY = os.getenv("PAYNOW_INTEGRATION_KEY")
 PAYNOW_RETURN_URL = os.getenv("PAYNOW_RETURN_URL", "https://pos-license-server.onrender.com/payment/return") # not strictly needed
 PAYNOW_RESULT_URL = os.getenv("PAYNOW_RESULT_URL", "https://pos-license-server.onrender.com/webhook/payment") # this is the webhook
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_SECRET")
+PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com")
 
 paynow = Paynow(
     PAYNOW_INTEGRATION_ID,
@@ -42,7 +45,7 @@ class StartPaynowRequest(BaseModel):
     product: str
     amount: float
 def paypal_headers():
-    auth = f"{PAYPAL_CLIENT_ID}:{PAYPAL_CLIENT_SECRET}"
+    auth = f"{PAYPAL_CLIENT_ID}:{PAYPAL_SECRET}"
     token = base64.b64encode(auth.encode()).decode()
 
     r = requests.post(

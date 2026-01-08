@@ -224,42 +224,46 @@ def check_payment(req: PaymentCheckRequest):
             )
 
             return {"ok": True, "license": license_key}
-# ---- PAYPAL ----
-if provider == "paypal":
-    order = paypal_get_order(req.reference)
 
-    # If user has not approved yet
-    if order["status"] == "CREATED":
-        return {"ok": False, "status": "WAITING_FOR_APPROVAL"}
+        # ---- PAYPAL ----
+        if provider == "paypal":
+            order = paypal_get_order(req.reference)
 
-    # If approved but not captured → CAPTURE NOW
-    if order["status"] == "APPROVED":
-        order = paypal_capture_order(req.reference)
+            # If user has not approved yet
+            if order["status"] == "CREATED":
+                return {"ok": False, "status": "WAITING_FOR_APPROVAL"}
 
-    if order["status"] != "COMPLETED":
-        return {"ok": False, "status": order["status"]}
+            # If approved but not captured → CAPTURE NOW
+            if order["status"] == "APPROVED":
+                order = paypal_capture_order(req.reference)
 
-    pu = order["purchase_units"][0]
-    capture = pu["payments"]["captures"][0]
+            if order["status"] != "COMPLETED":
+                return {"ok": False, "status": order["status"]}
 
-    if capture["status"] != "COMPLETED":
-        return {"ok": False, "status": capture["status"]}
+            pu = order["purchase_units"][0]
+            capture = pu["payments"]["captures"][0]
 
-    license_key = issue_license_for_order(
-        session=session,
-        provider="paypal",
-        provider_order_id=req.reference,
-        product="SWIFTPOS_SINGLE"
-    )
+            if capture["status"] != "COMPLETED":
+                return {"ok": False, "status": capture["status"]}
 
-    return {"ok": True, "license": license_key}
-raise HTTPException(status_code=400, detail="Unknown provider")
+            license_key = issue_license_for_order(
+                session=session,
+                provider="paypal",
+                provider_order_id=req.reference,
+                product="SWIFTPOS_SINGLE"
+            )
 
-except Exception as ex:
+            return {"ok": True, "license": license_key}
+
+        # Unknown provider
+        raise HTTPException(status_code=400, detail="Unknown provider")
+
+    except Exception as ex:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(ex))
-finally:
+    finally:
         session.close()
+
 
 @router.post("/paypal/start")
 def start_paypal_payment(req: StartPaynowRequest):

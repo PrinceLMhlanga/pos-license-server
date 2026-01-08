@@ -87,6 +87,62 @@ class ActivationRequest(BaseModel):
     license_key: str
     terminal_id: str
     extra: dict = {}
+class PaymentCheckRequest(BaseModel):
+    provider: str
+    reference: str
+def issue_license_for_order(session, provider, provider_order_id, product, email=None, phone=None):
+    # idempotency
+    existing = session.execute(sa.text("""
+        SELECT l.license_key
+        FROM orders o
+        JOIN licenses l ON l.order_id = o.id
+        WHERE o.provider = :prov AND o.provider_order_id = :poid
+    """), {"prov": provider, "poid": provider_order_id}).first()
+
+    if existing:
+        return existing[0]
+
+    # create order
+    res = session.execute(sa.text("""
+        INSERT INTO orders (provider, provider_order_id, status)
+        VALUES (:prov, :poid, 'paid')
+        RETURNING id
+    """), {"prov": provider, "poid": provider_order_id})
+    order_id = res.fetchone()[0]
+
+    # generate unique license
+    license_key = generate_license_key()
+    while session.execute(
+        sa.text("SELECT 1 FROM licenses WHERE license_key = :k"),
+        {"k": license_key}
+    ).first():
+        license_key = generate_license_key()
+
+    session.execute(sa.text("""
+        INSERT INTO licenses (license_key, product_sku, order_id, issued_phone, issued_email)
+        VALUES (:k, :sku, :oid, :phone, :email)
+    """), {
+        "k": license_key,
+        "sku": product,
+        "oid": order_id,
+        "phone": phone,
+        "email": email
+    })
+
+    session.commit()
+    return license_key
+def paypal_get_order(order_id):
+    token = paypal_headers()
+    r = requests.get(
+        f"{PAYPAL_BASE_URL}/v2/checkout/orders/{order_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10
+    )
+    r.raise_for_status()
+    return r.json()
+def paynow_check_status(reference):
+    status = paynow.poll_transaction(reference)
+    return status.status  # e.g. "Paid", "Awaiting Delivery"
 
 # --- Helper for activation history ---
 def _get_last_activation_terminal(session, license_id):
@@ -130,6 +186,57 @@ def start_paynow_payment(req: StartPaynowRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
+@router.post("/payment/check")
+def check_payment(req: PaymentCheckRequest):
+    session = SessionLocal()
+    try:
+        provider = req.provider.lower()
+
+        # ---- PAYNOW ----
+        if provider == "paynow":
+            status = paynow_check_status(req.reference)
+
+            if status.lower() != "paid":
+                return {"ok": False, "status": status}
+
+            license_key = issue_license_for_order(
+                session=session,
+                provider="paynow",
+                provider_order_id=req.reference,
+                product="SWIFTPOS_SINGLE"
+            )
+
+            return {"ok": True, "license": license_key}
+
+        # ---- PAYPAL ----
+        if provider == "paypal":
+            order = paypal_get_order(req.reference)
+
+            if order["status"] != "COMPLETED":
+                return {"ok": False, "status": order["status"]}
+
+            pu = order["purchase_units"][0]
+            capture = pu["payments"]["captures"][0]
+
+            if capture["status"] != "COMPLETED":
+                return {"ok": False, "status": capture["status"]}
+
+            license_key = issue_license_for_order(
+                session=session,
+                provider="paypal",
+                provider_order_id=req.reference,
+                product="SWIFTPOS_SINGLE"
+            )
+
+            return {"ok": True, "license": license_key}
+
+        raise HTTPException(status_code=400, detail="Unknown provider")
+
+    except Exception as ex:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(ex))
+    finally:
+        session.close()
 
 @router.post("/paypal/start")
 def start_paypal_payment(req: StartPaynowRequest):

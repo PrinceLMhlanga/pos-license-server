@@ -253,13 +253,12 @@ if provider == "paypal":
     )
 
     return {"ok": True, "license": license_key}
+raise HTTPException(status_code=400, detail="Unknown provider")
 
-        raise HTTPException(status_code=400, detail="Unknown provider")
-
-    except Exception as ex:
+except Exception as ex:
         session.rollback()
         raise HTTPException(status_code=500, detail=str(ex))
-    finally:
+finally:
         session.close()
 
 @router.post("/paypal/start")

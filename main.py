@@ -213,29 +213,37 @@ def check_payment(req: PaymentCheckRequest):
         # PAYNOW
         # =======================
         if provider == "paynow":
-            raw_status = paynow_check_status(req.reference)
+    response = paynow_check_status(req.reference)
 
-            # Normalize status safely
-            status = str(raw_status).strip().lower()
+    # Extract real status safely
+    if hasattr(response, "status"):
+        status = response.status
+    elif isinstance(response, dict) and "status" in response:
+        status = response["status"]
+    else:
+        status = str(response)
 
-            if status not in ("paid", "completed", "success"):
-                return {
-                    "ok": False,
-                    "status": status
-                }
+    status = status.strip().lower()
 
-            license_key = issue_license_for_order(
-                session=session,
-                provider="paynow",
-                provider_order_id=req.reference,
-                product="SWIFTPOS_SINGLE"
-            )
+    if status not in ("paid", "completed"):
+        return {
+            "ok": False,
+            "status": status
+        }
 
-            return {
-                "ok": True,
-                "status": "paid",
-                "license": license_key
-            }
+    license_key = issue_license_for_order(
+        session=session,
+        provider="paynow",
+        provider_order_id=req.reference,
+        product="SWIFTPOS_SINGLE"
+    )
+
+    return {
+        "ok": True,
+        "status": "paid",
+        "license": license_key
+    }
+
 
         # =======================
         # PAYPAL

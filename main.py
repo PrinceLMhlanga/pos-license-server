@@ -209,12 +209,20 @@ def check_payment(req: PaymentCheckRequest):
     try:
         provider = req.provider.lower()
 
-        # ---- PAYNOW ----
+        # =======================
+        # PAYNOW
+        # =======================
         if provider == "paynow":
-            status = paynow_check_status(req.reference)
+            raw_status = paynow_check_status(req.reference)
 
-            if status.lower() != "paid":
-                return {"ok": False, "status": status}
+            # Normalize status safely
+            status = str(raw_status).strip().lower()
+
+            if status not in ("paid", "completed", "success"):
+                return {
+                    "ok": False,
+                    "status": status
+                }
 
             license_key = issue_license_for_order(
                 session=session,
@@ -223,28 +231,31 @@ def check_payment(req: PaymentCheckRequest):
                 product="SWIFTPOS_SINGLE"
             )
 
-            return {"ok": True, "license": license_key}
+            return {
+                "ok": True,
+                "status": "paid",
+                "license": license_key
+            }
 
-        # ---- PAYPAL ----
+        # =======================
+        # PAYPAL
+        # =======================
         if provider == "paypal":
             order = paypal_get_order(req.reference)
 
-            # If user has not approved yet
             if order["status"] == "CREATED":
-                return {"ok": False, "status": "WAITING_FOR_APPROVAL"}
+                return {"ok": False, "status": "waiting_for_approval"}
 
-            # If approved but not captured → CAPTURE NOW
             if order["status"] == "APPROVED":
                 order = paypal_capture_order(req.reference)
 
             if order["status"] != "COMPLETED":
-                return {"ok": False, "status": order["status"]}
+                return {"ok": False, "status": order["status"].lower()}
 
-            pu = order["purchase_units"][0]
-            capture = pu["payments"]["captures"][0]
+            capture = order["purchase_units"][0]["payments"]["captures"][0]
 
             if capture["status"] != "COMPLETED":
-                return {"ok": False, "status": capture["status"]}
+                return {"ok": False, "status": capture["status"].lower()}
 
             license_key = issue_license_for_order(
                 session=session,
@@ -253,16 +264,21 @@ def check_payment(req: PaymentCheckRequest):
                 product="SWIFTPOS_SINGLE"
             )
 
-            return {"ok": True, "license": license_key}
+            return {
+                "ok": True,
+                "status": "paid",
+                "license": license_key
+            }
 
-        # Unknown provider
         raise HTTPException(status_code=400, detail="Unknown provider")
 
     except Exception as ex:
         session.rollback()
-        raise HTTPException(status_code=500, detail=str(ex))
+        raise HTTPException(status_code=500, detail=f"Payment check error: {ex}")
+
     finally:
         session.close()
+
 
 
 @router.post("/paypal/start")

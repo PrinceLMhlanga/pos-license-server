@@ -157,9 +157,15 @@ def paypal_capture_order(order_id: str):
     r.raise_for_status()
     return r.json()
 
-def paynow_check_status(reference):
-    status = paynow.poll_transaction(reference)
-    return status.status  # e.g. "Paid", "Awaiting Delivery"
+def paynow_check_status(reference: str):
+    payment = session.query(Payment).filter_by(reference=reference).first()
+
+    if not payment or not payment.poll_url:
+        raise Exception("Poll URL not found")
+
+    status = paynow.check_transaction_status(payment.poll_url)
+
+    return status.status  # Paid, Awaiting Delivery, Cancelled, etc.
 
 # --- Helper for activation history ---
 def _get_last_activation_terminal(session, license_id):
@@ -207,28 +213,31 @@ def start_paynow_payment(req: StartPaynowRequest):
 def check_payment(req: PaymentCheckRequest):
     session = SessionLocal()
     try:
-        provider = req.provider.lower()
+        provider = req.provider.lower().strip()
 
         # =======================
         # PAYNOW
         # =======================
         if provider == "paynow":
-            response = paynow_check_status(req.reference)
+            status = paynow_check_status(req.reference)
 
-            # Extract real status safely
-            if hasattr(response, "status"):
-                status = response.status
-            elif isinstance(response, dict) and "status" in response:
-                status = response["status"]
-            else:
-                status = str(response)
-
-            status = status.strip().lower()
-
-            if status not in ("paid", "completed"):
+            if status != "paid":
                 return {
                     "ok": False,
                     "status": status
+                }
+
+            # Prevent double issuing
+            existing = session.query(License).filter_by(
+                provider="paynow",
+                provider_order_id=req.reference
+            ).first()
+
+            if existing:
+                return {
+                    "ok": True,
+                    "status": "paid",
+                    "license": existing.license_key
                 }
 
             license_key = issue_license_for_order(
@@ -264,6 +273,18 @@ def check_payment(req: PaymentCheckRequest):
             if capture["status"] != "COMPLETED":
                 return {"ok": False, "status": capture["status"].lower()}
 
+            existing = session.query(License).filter_by(
+                provider="paypal",
+                provider_order_id=req.reference
+            ).first()
+
+            if existing:
+                return {
+                    "ok": True,
+                    "status": "paid",
+                    "license": existing.license_key
+                }
+
             license_key = issue_license_for_order(
                 session=session,
                 provider="paypal",
@@ -278,17 +299,20 @@ def check_payment(req: PaymentCheckRequest):
             }
 
         # =======================
-        # UNKNOWN PROVIDER
+        # UNKNOWN
         # =======================
         raise HTTPException(status_code=400, detail="Unknown provider")
 
+    except HTTPException:
+        raise
+
     except Exception as ex:
         session.rollback()
-        raise HTTPException(status_code=500, detail=f"Payment check error: {ex}")
+        logger.exception("🔥 CHECK PAYMENT ERROR")
+        raise HTTPException(status_code=500, detail=str(ex))
 
     finally:
         session.close()
-
 
 @router.post("/paypal/start")
 def start_paypal_payment(req: StartPaynowRequest):

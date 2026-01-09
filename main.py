@@ -213,37 +213,36 @@ def check_payment(req: PaymentCheckRequest):
         # PAYNOW
         # =======================
         if provider == "paynow":
-    response = paynow_check_status(req.reference)
+            response = paynow_check_status(req.reference)
 
-    # Extract real status safely
-    if hasattr(response, "status"):
-        status = response.status
-    elif isinstance(response, dict) and "status" in response:
-        status = response["status"]
-    else:
-        status = str(response)
+            # Extract real status safely
+            if hasattr(response, "status"):
+                status = response.status
+            elif isinstance(response, dict) and "status" in response:
+                status = response["status"]
+            else:
+                status = str(response)
 
-    status = status.strip().lower()
+            status = status.strip().lower()
 
-    if status not in ("paid", "completed"):
-        return {
-            "ok": False,
-            "status": status
-        }
+            if status not in ("paid", "completed"):
+                return {
+                    "ok": False,
+                    "status": status
+                }
 
-    license_key = issue_license_for_order(
-        session=session,
-        provider="paynow",
-        provider_order_id=req.reference,
-        product="SWIFTPOS_SINGLE"
-    )
+            license_key = issue_license_for_order(
+                session=session,
+                provider="paynow",
+                provider_order_id=req.reference,
+                product="SWIFTPOS_SINGLE"
+            )
 
-    return {
-        "ok": True,
-        "status": "paid",
-        "license": license_key
-    }
-
+            return {
+                "ok": True,
+                "status": "paid",
+                "license": license_key
+            }
 
         # =======================
         # PAYPAL
@@ -278,6 +277,9 @@ def check_payment(req: PaymentCheckRequest):
                 "license": license_key
             }
 
+        # =======================
+        # UNKNOWN PROVIDER
+        # =======================
         raise HTTPException(status_code=400, detail="Unknown provider")
 
     except Exception as ex:
@@ -286,7 +288,6 @@ def check_payment(req: PaymentCheckRequest):
 
     finally:
         session.close()
-
 
 
 @router.post("/paypal/start")

@@ -86,6 +86,8 @@ class PaymentWebhook(BaseModel):
     customer_email: Optional[str] = None
     product_sku: str
 Base = declarative_base()
+# after Base = declarative_base() and model classes and after engine = sa.create_engine(...)
+Base.metadata.create_all(bind=engine)
 
 class Payment(Base):
     __tablename__ = "payments"

@@ -227,21 +227,37 @@ def start_paynow_payment(req: StartPaynowRequest):
 @router.post("/payment/check")
 def check_payment(req: PaymentCheckRequest):
     session = SessionLocal()
+
     try:
-        provider = req.provider.lower()
+        provider = req.provider.lower().strip()
 
-        # =======================
+        # =========================
         # PAYNOW
-        # =======================
+        # =========================
         if provider == "paynow":
-            status = paynow_check_status(req.reference)
+            raw_status = paynow_check_status(session, req.reference)
 
-            if status not in ("paid", "completed"):
+            # Normalize Paynow statuses
+            status_map = {
+                "paid": "paid",
+                "awaiting delivery": "paid",
+                "awaiting payment": "pending",
+                "created": "pending",
+                "cancelled": "failed",
+                "failed": "failed",
+                "disputed": "failed",
+            }
+
+            status = status_map.get(raw_status.lower(), "pending")
+
+            # Not paid yet
+            if status != "paid":
                 return {
                     "ok": False,
                     "status": status
                 }
 
+            # Paid → issue or fetch existing license
             license_key = issue_license_for_order(
                 session=session,
                 provider="paynow",
@@ -255,25 +271,31 @@ def check_payment(req: PaymentCheckRequest):
                 "license": license_key
             }
 
-        # =======================
+        # =========================
         # PAYPAL
-        # =======================
+        # =========================
         if provider == "paypal":
             order = paypal_get_order(req.reference)
 
             if order["status"] == "CREATED":
-                return {"ok": False, "status": "waiting_for_approval"}
+                return {"ok": False, "status": "pending"}
 
             if order["status"] == "APPROVED":
                 order = paypal_capture_order(req.reference)
 
             if order["status"] != "COMPLETED":
-                return {"ok": False, "status": order["status"].lower()}
+                return {
+                    "ok": False,
+                    "status": order["status"].lower()
+                }
 
             capture = order["purchase_units"][0]["payments"]["captures"][0]
 
             if capture["status"] != "COMPLETED":
-                return {"ok": False, "status": capture["status"].lower()}
+                return {
+                    "ok": False,
+                    "status": capture["status"].lower()
+                }
 
             license_key = issue_license_for_order(
                 session=session,
@@ -288,13 +310,23 @@ def check_payment(req: PaymentCheckRequest):
                 "license": license_key
             }
 
-        raise HTTPException(status_code=400, detail="Unknown provider")
+        # =========================
+        # UNKNOWN PROVIDER
+        # =========================
+        raise HTTPException(status_code=400, detail="Unknown payment provider")
+
+    except HTTPException:
+        raise
 
     except Exception as ex:
         session.rollback()
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Payment check error: {ex}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Payment check failed"
+        )
 
     finally:
         session.close()

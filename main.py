@@ -34,7 +34,7 @@ PAYNOW_RETURN_URL = os.getenv("PAYNOW_RETURN_URL", "https://pos-license-server.o
 PAYNOW_RESULT_URL = os.getenv("PAYNOW_RESULT_URL", "https://pos-license-server.onrender.com/webhook/payment") # this is the webhook
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
 PAYPAL_SECRET = os.getenv("PAYPAL_SECRET")
-PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com")
+PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.paypal.com")
 PAYPAL_CURRENCY=os.getenv("PAYPAL_CURRENCY")
 paynow = Paynow(
     PAYNOW_INTEGRATION_ID,

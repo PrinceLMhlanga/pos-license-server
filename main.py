@@ -174,48 +174,45 @@ def paypal_capture_order(order_id: str):
     r.raise_for_status()
     return r.json()
 
+import requests
+from urllib.parse import urljoin
+
 def paynow_check_status(session, reference: str) -> str:
-    """
-    Poll the Paynow payment using the stored poll_url and return a canonical status:
-    'paid', 'pending', or 'failed'.
-    """
     payment = session.query(Payment).filter_by(
         provider="paynow",
         provider_order_id=reference
     ).first()
-
     if not payment:
         raise Exception(f"Payment record not found for reference {reference}")
 
-    if not payment.poll_url:
-        raise Exception(f"No poll_url stored for payment {reference}")
+    # Construct Paynow status endpoint (integration URL)
+    # Replace PAYNOW_INTEGRATION_ID / KEY with env vars
+    url = "https://www.paynow.co.zw/interface/merchant/confirm/process"  # live example
+
+    data = {
+        "id": PAYNOW_INTEGRATION_ID,
+        "key": PAYNOW_INTEGRATION_KEY,
+        "reference": reference
+    }
 
     try:
-        # ⚡ Manually poll the Paynow URL
-        r = requests.get(payment.poll_url, timeout=10)
+        r = requests.post(url, data=data, timeout=10)
         r.raise_for_status()
-        data = r.json()
+        text = r.text.strip()
     except Exception as e:
-        raise Exception(f"Failed to poll Paynow transaction: {e}")
+        raise Exception(f"Failed to query Paynow: {e}")
 
-    # Extract status
-    raw_status = data.get("status") or data.get("transaction_status")
-    if not raw_status:
-        raise Exception("Poll response missing 'status' field")
-
-    status_text = str(raw_status).strip().lower()
-
-    # Map Paynow statuses to canonical statuses
+    # Paynow returns a simple string, e.g.:
+    # "Complete", "Pending", "Cancelled", etc.
     status_map = {
-        "paid": "paid",
-        "awaiting delivery": "paid",
-        "awaiting payment": "pending",
-        "created": "pending",
-        "cancelled": "failed",
-        "failed": "failed",
-        "disputed": "failed",
+        "Complete": "paid",
+        "Paid": "paid",
+        "Pending": "pending",
+        "AwaitingPayment": "pending",
+        "Cancelled": "failed",
+        "Failed": "failed"
     }
-    mapped_status = status_map.get(status_text, "pending")
+    mapped_status = status_map.get(text, "pending")
 
     # Update DB
     payment.status = mapped_status

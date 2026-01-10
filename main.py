@@ -213,20 +213,40 @@ def start_paynow_payment(req: StartPaynowRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(ex))
+from fastapi import HTTPException
+import traceback
+
 @router.post("/payment/check")
 def check_payment(req: PaymentCheckRequest):
     session = SessionLocal()
-
     try:
+        # Validate request
+        if not getattr(req, "provider", None) or not getattr(req, "reference", None):
+            raise HTTPException(status_code=400, detail="provider and reference are required")
+
         provider = req.provider.lower().strip()
 
         # =========================
         # PAYNOW
         # =========================
         if provider == "paynow":
-            raw_status = paynow_check_status(session, req.reference)
+            try:
+                raw_status = paynow_check_status(session, req.reference)
+            except Exception as e:
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"paynow_check_status error: {e}")
 
-            # Normalize Paynow statuses
+            if raw_status is None:
+                raise HTTPException(status_code=500, detail="paynow_check_status returned None")
+
+            # Normalize to string safely
+            try:
+                status_text = str(raw_status).strip().lower()
+            except Exception as e:
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Invalid paynow status type: {type(raw_status)}")
+
+            # Map PayNow statuses to canonical statuses
             status_map = {
                 "paid": "paid",
                 "awaiting delivery": "paid",
@@ -236,68 +256,74 @@ def check_payment(req: PaymentCheckRequest):
                 "failed": "failed",
                 "disputed": "failed",
             }
-
-            status = status_map.get(raw_status.lower(), "pending")
+            status = status_map.get(status_text, "pending")
 
             # Not paid yet
             if status != "paid":
-                return {
-                    "ok": False,
-                    "status": status
-                }
+                return {"ok": False, "status": status}
 
             # Paid → issue or fetch existing license
-            license_key = issue_license_for_order(
-                session=session,
-                provider="paynow",
-                provider_order_id=req.reference,
-                product="SWIFTPOS_SINGLE"
-            )
+            try:
+                license_key = issue_license_for_order(
+                    session=session,
+                    provider="paynow",
+                    provider_order_id=req.reference,
+                    product="SWIFTPOS_SINGLE"
+                )
+                session.commit()
+            except Exception as e:
+                traceback.print_exc()
+                session.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to issue license: {e}")
 
-            return {
-                "ok": True,
-                "status": "paid",
-                "license": license_key
-            }
+            return {"ok": True, "status": "paid", "license": license_key}
 
         # =========================
         # PAYPAL
         # =========================
         if provider == "paypal":
-            order = paypal_get_order(req.reference)
+            try:
+                order = paypal_get_order(req.reference)
+            except Exception as e:
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"paypal_get_order error: {e}")
 
-            if order["status"] == "CREATED":
+            if order.get("status") == "CREATED":
                 return {"ok": False, "status": "pending"}
 
-            if order["status"] == "APPROVED":
-                order = paypal_capture_order(req.reference)
+            if order.get("status") == "APPROVED":
+                try:
+                    order = paypal_capture_order(req.reference)
+                except Exception as e:
+                    traceback.print_exc()
+                    raise HTTPException(status_code=500, detail=f"paypal_capture_order error: {e}")
 
-            if order["status"] != "COMPLETED":
-                return {
-                    "ok": False,
-                    "status": order["status"].lower()
-                }
+            if order.get("status") != "COMPLETED":
+                return {"ok": False, "status": order.get("status", "").lower()}
 
-            capture = order["purchase_units"][0]["payments"]["captures"][0]
+            try:
+                capture = order["purchase_units"][0]["payments"]["captures"][0]
+            except Exception:
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail="Unexpected PayPal order structure")
 
-            if capture["status"] != "COMPLETED":
-                return {
-                    "ok": False,
-                    "status": capture["status"].lower()
-                }
+            if capture.get("status") != "COMPLETED":
+                return {"ok": False, "status": capture.get("status", "").lower()}
 
-            license_key = issue_license_for_order(
-                session=session,
-                provider="paypal",
-                provider_order_id=req.reference,
-                product="SWIFTPOS_SINGLE"
-            )
+            try:
+                license_key = issue_license_for_order(
+                    session=session,
+                    provider="paypal",
+                    provider_order_id=req.reference,
+                    product="SWIFTPOS_SINGLE"
+                )
+                session.commit()
+            except Exception as e:
+                traceback.print_exc()
+                session.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to issue license: {e}")
 
-            return {
-                "ok": True,
-                "status": "paid",
-                "license": license_key
-            }
+            return {"ok": True, "status": "paid", "license": license_key}
 
         # =========================
         # UNKNOWN PROVIDER
@@ -305,17 +331,14 @@ def check_payment(req: PaymentCheckRequest):
         raise HTTPException(status_code=400, detail="Unknown payment provider")
 
     except HTTPException:
+        # Re-raise HTTPExceptions unchanged
         raise
 
     except Exception as ex:
-        session.rollback()
-        import traceback
+        # Log and return a generic server error
         traceback.print_exc()
-
-        raise HTTPException(
-            status_code=500,
-            detail="Payment check failed"
-        )
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Payment check failed")
 
     finally:
         session.close()

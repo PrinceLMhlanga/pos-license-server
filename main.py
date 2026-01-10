@@ -178,6 +178,10 @@ import requests
 from urllib.parse import urljoin
 
 def paynow_check_status(session, reference: str) -> str:
+    """
+    Poll Paynow live to check payment status.
+    Returns: 'paid', 'pending', or 'failed'.
+    """
     payment = session.query(Payment).filter_by(
         provider="paynow",
         provider_order_id=reference
@@ -185,36 +189,36 @@ def paynow_check_status(session, reference: str) -> str:
     if not payment:
         raise Exception(f"Payment record not found for reference {reference}")
 
-    # Construct Paynow status endpoint (integration URL)
-    # Replace PAYNOW_INTEGRATION_ID / KEY with env vars
-    url = "https://www.paynow.co.zw/interface/merchant/confirm/process"  # live example
+    # --- Live Paynow check endpoint ---
+    url = "https://www.paynow.co.zw/interface/merchant/check"
 
+    # POST payload
     data = {
-        "id": PAYNOW_INTEGRATION_ID,
-        "key": PAYNOW_INTEGRATION_KEY,
+        "id": PAYNOW_INTEGRATION_ID,   # from .env
+        "key": PAYNOW_INTEGRATION_KEY, # from .env
         "reference": reference
     }
 
     try:
         r = requests.post(url, data=data, timeout=10)
         r.raise_for_status()
-        text = r.text.strip()
+        # Paynow returns plain text like "Paid", "Pending", "Failed"
+        status_text = r.text.strip()
     except Exception as e:
         raise Exception(f"Failed to query Paynow: {e}")
 
-    # Paynow returns a simple string, e.g.:
-    # "Complete", "Pending", "Cancelled", etc.
+    # --- Map Paynow status to canonical status ---
     status_map = {
-        "Complete": "paid",
         "Paid": "paid",
-        "Pending": "pending",
+        "Complete": "paid",
         "AwaitingPayment": "pending",
+        "Pending": "pending",
         "Cancelled": "failed",
         "Failed": "failed"
     }
-    mapped_status = status_map.get(text, "pending")
+    mapped_status = status_map.get(status_text, "pending")
 
-    # Update DB
+    # --- Update DB ---
     payment.status = mapped_status
     session.commit()
 

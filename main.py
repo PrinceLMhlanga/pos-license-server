@@ -179,61 +179,58 @@ from urllib.parse import urljoin
 
 def paynow_check_status(session, reference: str) -> str:
     """
-    Poll Paynow live to check payment status.
-    Returns: 'paid', 'pending', or 'failed'.
+    Poll Paynow LIVE to check payment status.
+    Returns: 'paid', 'pending', or 'failed'
     """
+
     payment = session.query(Payment).filter_by(
         provider="paynow",
         provider_order_id=reference
     ).first()
+
     if not payment:
         raise Exception(f"Payment record not found for reference {reference}")
 
-    # --- Live Paynow check endpoint ---
-    url = "https://www.paynow.co.zw/interface/merchant/check"
+    # ✅ ALWAYS use the poll_url returned by Paynow
+    url = payment.poll_url
 
-    # POST payload
     data = {
-        "id": PAYNOW_INTEGRATION_ID,    # from .env
-        "key": PAYNOW_INTEGRATION_KEY,  # from .env
-        "reference": reference
+        "id": PAYNOW_INTEGRATION_ID,
+        "key": PAYNOW_INTEGRATION_KEY,
     }
 
     try:
         r = requests.post(url, data=data, timeout=10)
         r.raise_for_status()
-        # Paynow returns plain text like "Paid", "Pending", "Failed"
-        status_text = r.text.strip()
+        raw = r.text.strip().lower()
     except Exception as e:
-        raise Exception(f"Failed to query Paynow: {e}")
+        raise Exception(f"Failed to poll Paynow transaction: {e}")
 
-    status_text = status_text.strip().lower()
+    # 🧠 Paynow authoritative logic
+    if "paid=true" in raw or "status=paid" in raw:
+        mapped_status = "paid"
 
-    status_map = {
-        # PAID
-        "paid": "paid",
-        "complete": "paid",
+    elif any(x in raw for x in [
+        "failed",
+        "cancelled",
+        "canceled",
+        "expired",
+        "error",
+        "timeout",
+        "timed out",
+        "insufficient funds"
+    ]):
+        mapped_status = "failed"
 
-        # PENDING (user still has time)
-        "pending": "pending",
-        "awaitingpayment": "pending",
-        "awaiting payment": "pending",
+    else:
+        mapped_status = "pending"
 
-        # FAILED / TERMINAL
-        "cancelled": "failed",
-        "canceled": "failed",
-        "failed": "failed",
-        "error": "failed",
-        "timed out": "failed",
-        "timeout": "failed",
-        "expired": "failed",
-        "insufficient funds": "failed",
-        "transaction cancelled": "failed",
-        "user cancelled": "failed",
-    }
+    # ✅ Update DB
+    payment.status = mapped_status
+    session.commit()
 
-    mapped_status = status_map.get(status_text, "unknown")
     return mapped_status
+
 
 # --- Helper for activation history ---
 def _get_last_activation_terminal(session, license_id):

@@ -157,29 +157,18 @@ def paypal_capture_order(order_id: str):
     r.raise_for_status()
     return r.json()
 
-def paynow_check_status(reference: str) -> str:
-    session = SessionLocal()
-    try:
-        payment = session.query(Payment).filter_by(reference=reference).first()
+def paynow_check_status(session, reference: str) -> str:
+    payment = session.query(Payment).filter_by(
+        provider="paynow",
+        provider_order_id=reference
+    ).first()
 
-        if not payment:
-            raise Exception(f"Payment reference not found: {reference}")
+    if not payment:
+        raise Exception("Payment record not found")
 
-        if not payment.poll_url:
-            raise Exception("Poll URL missing for payment")
+    response = paynow.poll_transaction(payment.poll_url)
 
-        response = paynow.check_transaction_status(payment.poll_url)
-
-        # PayNow SDK usually returns an object with .status
-        status = getattr(response, "status", None)
-
-        if not status:
-            raise Exception(f"Invalid PayNow response: {response}")
-
-        return status.strip().lower()
-
-    finally:
-        session.close()
+    return response.status.lower()
 
 
 # --- Helper for activation history ---

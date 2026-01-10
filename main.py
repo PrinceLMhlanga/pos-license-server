@@ -207,22 +207,33 @@ def paynow_check_status(session, reference: str) -> str:
     except Exception as e:
         raise Exception(f"Failed to query Paynow: {e}")
 
-    # --- Map Paynow status to canonical status ---
-    status_map = {
-        "Paid": "paid",
-        "Complete": "paid",
-        "AwaitingPayment": "pending",
-        "Pending": "pending",
-        "Cancelled": "failed",
-        "Failed": "failed"
-    }
-    mapped_status = status_map.get(status_text, "pending")
+   status_text = status_text.strip().lower()
 
-    # --- Update DB ---
-    payment.status = mapped_status
-    session.commit()
+status_map = {
+    # PAID
+    "paid": "paid",
+    "complete": "paid",
 
-    return mapped_status
+    # PENDING (user still has time)
+    "pending": "pending",
+    "awaitingpayment": "pending",
+    "awaiting payment": "pending",
+
+    # FAILED / TERMINAL
+    "cancelled": "failed",
+    "canceled": "failed",
+    "failed": "failed",
+    "error": "failed",
+    "timed out": "failed",
+    "timeout": "failed",
+    "expired": "failed",
+    "insufficient funds": "failed",
+    "transaction cancelled": "failed",
+    "user cancelled": "failed",
+}
+
+mapped_status = status_map.get(status_text, "pending")
+
 
 
 # --- Helper for activation history ---

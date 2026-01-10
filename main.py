@@ -69,6 +69,7 @@ if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):
 engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=engine)
 
+
 # --- Key loading ---
 PRIVATE_KEY = PRIVATE_KEY_ENV.encode() if isinstance(PRIVATE_KEY_ENV, str) else PRIVATE_KEY_ENV
 PUBLIC_KEY = PUBLIC_KEY_ENV.encode() if isinstance(PUBLIC_KEY_ENV, str) else PUBLIC_KEY_ENV
@@ -86,8 +87,7 @@ class PaymentWebhook(BaseModel):
     customer_email: Optional[str] = None
     product_sku: str
 Base = declarative_base()
-# after Base = declarative_base() and model classes and after engine = sa.create_engine(...)
-Base.metadata.create_all(bind=engine)
+
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -105,6 +105,9 @@ class ActivationRequest(BaseModel):
 class PaymentCheckRequest(BaseModel):
     provider: str
     reference: str
+
+# after Base = declarative_base() and model classes and after engine = sa.create_engine(...)
+Base.metadata.create_all(bind=engine)
 def issue_license_for_order(session, provider, provider_order_id, product, email=None, phone=None):
     # idempotency
     existing = session.execute(sa.text("""

@@ -194,8 +194,8 @@ def paynow_check_status(session, reference: str) -> str:
 
     # POST payload
     data = {
-        "id": PAYNOW_INTEGRATION_ID,   # from .env
-        "key": PAYNOW_INTEGRATION_KEY, # from .env
+        "id": PAYNOW_INTEGRATION_ID,    # from .env
+        "key": PAYNOW_INTEGRATION_KEY,  # from .env
         "reference": reference
     }
 
@@ -207,34 +207,33 @@ def paynow_check_status(session, reference: str) -> str:
     except Exception as e:
         raise Exception(f"Failed to query Paynow: {e}")
 
-   status_text = status_text.strip().lower()
+    status_text = status_text.strip().lower()
 
-status_map = {
-    # PAID
-    "paid": "paid",
-    "complete": "paid",
+    status_map = {
+        # PAID
+        "paid": "paid",
+        "complete": "paid",
 
-    # PENDING (user still has time)
-    "pending": "pending",
-    "awaitingpayment": "pending",
-    "awaiting payment": "pending",
+        # PENDING (user still has time)
+        "pending": "pending",
+        "awaitingpayment": "pending",
+        "awaiting payment": "pending",
 
-    # FAILED / TERMINAL
-    "cancelled": "failed",
-    "canceled": "failed",
-    "failed": "failed",
-    "error": "failed",
-    "timed out": "failed",
-    "timeout": "failed",
-    "expired": "failed",
-    "insufficient funds": "failed",
-    "transaction cancelled": "failed",
-    "user cancelled": "failed",
-}
+        # FAILED / TERMINAL
+        "cancelled": "failed",
+        "canceled": "failed",
+        "failed": "failed",
+        "error": "failed",
+        "timed out": "failed",
+        "timeout": "failed",
+        "expired": "failed",
+        "insufficient funds": "failed",
+        "transaction cancelled": "failed",
+        "user cancelled": "failed",
+    }
 
-mapped_status = status_map.get(status_text, "pending")
-
-
+    mapped_status = status_map.get(status_text, "pending")
+    return mapped_status
 
 # --- Helper for activation history ---
 def _get_last_activation_terminal(session, license_id):

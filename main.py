@@ -176,10 +176,9 @@ def paypal_capture_order(order_id: str):
 
 def paynow_check_status(session, reference: str) -> str:
     """
-    Check the status of a Paynow payment by reference.
-    Returns a lowercase status string: 'paid', 'pending', or 'failed'.
+    Poll the Paynow payment using the stored poll_url and return a canonical status:
+    'paid', 'pending', or 'failed'.
     """
-    # 1️⃣ Fetch payment record from DB
     payment = session.query(Payment).filter_by(
         provider="paynow",
         provider_order_id=reference
@@ -188,24 +187,25 @@ def paynow_check_status(session, reference: str) -> str:
     if not payment:
         raise Exception(f"Payment record not found for reference {reference}")
 
-    # 2️⃣ Use Paynow wrapper to poll transaction
-    # ⚠️ Make sure your Paynow wrapper has this method. 
-    # Most wrappers use poll_transaction_status() or poll()
+    if not payment.poll_url:
+        raise Exception(f"No poll_url stored for payment {reference}")
+
     try:
-        response = paynow.poll_transaction_status(payment.poll_url)
-    except AttributeError:
-        raise Exception("Your Paynow object has no 'poll_transaction_status' method. Check your wrapper.")
+        # ⚡ Manually poll the Paynow URL
+        r = requests.get(payment.poll_url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
     except Exception as e:
         raise Exception(f"Failed to poll Paynow transaction: {e}")
 
-    # 3️⃣ Normalize status
-    raw_status = getattr(response, "status", None)
+    # Extract status
+    raw_status = data.get("status") or data.get("transaction_status")
     if not raw_status:
-        raise Exception("Paynow response missing status")
+        raise Exception("Poll response missing 'status' field")
 
     status_text = str(raw_status).strip().lower()
 
-    # 4️⃣ Map Paynow statuses to canonical statuses
+    # Map Paynow statuses to canonical statuses
     status_map = {
         "paid": "paid",
         "awaiting delivery": "paid",
@@ -217,7 +217,7 @@ def paynow_check_status(session, reference: str) -> str:
     }
     mapped_status = status_map.get(status_text, "pending")
 
-    # 5️⃣ Update DB record
+    # Update DB
     payment.status = mapped_status
     session.commit()
 

@@ -13,6 +13,8 @@ from generate_keys import generate_license_key
 from paynow import Paynow
 import requests
 from requests.auth import HTTPBasicAuth
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime
 load_dotenv()
 router = APIRouter()
 
@@ -83,7 +85,17 @@ class PaymentWebhook(BaseModel):
     customer_phone: Optional[str] = None
     customer_email: Optional[str] = None
     product_sku: str
+Base = declarative_base()
 
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String, nullable=False)
+    provider_order_id = Column(String, nullable=False, unique=True)
+    poll_url = Column(String, nullable=False)
+    status = Column(String, default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
 class ActivationRequest(BaseModel):
     license_key: str
     terminal_id: str
@@ -180,39 +192,48 @@ def _get_last_activation_terminal(session, license_id):
     return row[0] if row else None
 @router.post("/paynow/start")
 def start_paynow_payment(req: StartPaynowRequest):
+    session = SessionLocal()
     try:
         reference = f"POS-{int(time.time())}"
 
-        payment = paynow.create_payment(
+        payment_req = paynow.create_payment(
             reference,
             req.email or "buyer@swiftpos.co.zw"
         )
 
-        payment.add(req.product, float(req.amount))
+        payment_req.add(req.product, float(req.amount))
 
-        # optional mobile hint
         if req.phone:
-            payment.paynow_mobile = req.phone
+            payment_req.paynow_mobile = req.phone
 
-        response = paynow.send(payment)
+        response = paynow.send(payment_req)
 
         if not response.success:
-            raise HTTPException(
-                status_code=400,
-                detail=response.errors
-            )
+            raise HTTPException(status_code=400, detail=response.errors)
+
+        # 🔑 SAVE PAYMENT (THIS WAS MISSING)
+        payment = Payment(
+            provider="paynow",
+            provider_order_id=reference,
+            poll_url=response.poll_url,
+            status="pending"
+        )
+
+        session.add(payment)
+        session.commit()
 
         return {
             "ok": True,
             "redirect_url": response.redirect_url,
-            "poll_url": response.poll_url,
             "reference": reference
         }
 
     except Exception as ex:
-        import traceback
-        traceback.print_exc()
+        session.rollback()
         raise HTTPException(status_code=500, detail=str(ex))
+    finally:
+        session.close()
+
 from fastapi import HTTPException
 import traceback
 

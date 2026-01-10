@@ -52,3 +52,12 @@ CREATE TABLE IF NOT EXISTS license_activations (
   terminal_id TEXT NOT NULL,
   activated_at TIMESTAMPTZ DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS payments (
+    id SERIAL PRIMARY KEY,
+    provider TEXT NOT NULL,
+    provider_order_id TEXT NOT NULL UNIQUE,
+    poll_url TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+

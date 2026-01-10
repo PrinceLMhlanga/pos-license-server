@@ -232,7 +232,7 @@ def paynow_check_status(session, reference: str) -> str:
         "user cancelled": "failed",
     }
 
-    mapped_status = status_map.get(status_text, "pending")
+    mapped_status = status_map.get(status_text, "unknown")
     return mapped_status
 
 # --- Helper for activation history ---

@@ -175,17 +175,53 @@ def paypal_capture_order(order_id: str):
     return r.json()
 
 def paynow_check_status(session, reference: str) -> str:
+    """
+    Check the status of a Paynow payment by reference.
+    Returns a lowercase status string: 'paid', 'pending', or 'failed'.
+    """
+    # 1️⃣ Fetch payment record from DB
     payment = session.query(Payment).filter_by(
         provider="paynow",
         provider_order_id=reference
     ).first()
 
     if not payment:
-        raise Exception("Payment record not found")
+        raise Exception(f"Payment record not found for reference {reference}")
 
-    response = paynow.poll_transaction(payment.poll_url)
+    # 2️⃣ Use Paynow wrapper to poll transaction
+    # ⚠️ Make sure your Paynow wrapper has this method. 
+    # Most wrappers use poll_transaction_status() or poll()
+    try:
+        response = paynow.poll_transaction_status(payment.poll_url)
+    except AttributeError:
+        raise Exception("Your Paynow object has no 'poll_transaction_status' method. Check your wrapper.")
+    except Exception as e:
+        raise Exception(f"Failed to poll Paynow transaction: {e}")
 
-    return response.status.lower()
+    # 3️⃣ Normalize status
+    raw_status = getattr(response, "status", None)
+    if not raw_status:
+        raise Exception("Paynow response missing status")
+
+    status_text = str(raw_status).strip().lower()
+
+    # 4️⃣ Map Paynow statuses to canonical statuses
+    status_map = {
+        "paid": "paid",
+        "awaiting delivery": "paid",
+        "awaiting payment": "pending",
+        "created": "pending",
+        "cancelled": "failed",
+        "failed": "failed",
+        "disputed": "failed",
+    }
+    mapped_status = status_map.get(status_text, "pending")
+
+    # 5️⃣ Update DB record
+    payment.status = mapped_status
+    session.commit()
+
+    return mapped_status
 
 
 # --- Helper for activation history ---

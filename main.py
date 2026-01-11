@@ -369,12 +369,19 @@ def check_payment(req: PaymentCheckRequest):
 
             # Paid → issue or fetch existing license
             try:
-                license_payload = issue_license_for_order(
+                license_key = issue_license_for_order(
                     session=session,
                     provider="paynow",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
+                license_payload = {
+                    "license_key": license_key,
+                    "product": "SWIFTPOS_SINGLE",
+                    "provider": "paynow",
+                    "order_id": req.reference,
+                    "issued_at": int(time.time())
+                }
                 signed_license = create_signed_license(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
@@ -417,12 +424,20 @@ def check_payment(req: PaymentCheckRequest):
                 return {"ok": False, "status": capture.get("status", "").lower()}
 
             try:
-                license_payload = issue_license_for_order(
+                license_key = issue_license_for_order(
                     session=session,
                     provider="paypal",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
+
+                license_payload = {
+                    "license_key": license_key,
+                    "product": "SWIFTPOS_SINGLE",
+                    "provider": "paypal",
+                    "order_id": req.reference,
+                    "issued_at": int(time.time())
+                }
                 signed_license = create_signed_license(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
@@ -449,7 +464,6 @@ def check_payment(req: PaymentCheckRequest):
 
     finally:
         session.close()
-
 
 @router.post("/paypal/start")
 def start_paypal_payment(req: StartPaynowRequest):

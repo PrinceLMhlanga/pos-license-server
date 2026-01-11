@@ -154,7 +154,7 @@ class Payment(Base):
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 class ActivationRequest(BaseModel):
-    license: str
+    license_key: str
     terminal_id: str
    
 class PaymentCheckRequest(BaseModel):

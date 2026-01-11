@@ -145,9 +145,9 @@ class Payment(Base):
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 class ActivationRequest(BaseModel):
-    license_key: str
+    license: str
     terminal_id: str
-    extra: dict = {}
+   
 class PaymentCheckRequest(BaseModel):
     provider: str
     reference: str
@@ -627,15 +627,53 @@ async def webhook_payment(payload: PaymentWebhook, background_tasks: BackgroundT
         session.close()
 
 # --- LICENSE ACTIVATION (client hits with key+terminal id) ---
+from fastapi import HTTPException
+import base64, json
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from datetime import datetime
+
 @app.post("/licenses/activate")
 async def activate_license(req: ActivationRequest):
     session = SessionLocal()
     try:
+        # =========================
+        # 1️⃣ Decode & verify signed license
+        # =========================
+        try:
+            decoded = base64.b64decode(req.license)
+            license_obj = json.loads(decoded)
+
+            payload = license_obj["payload"]
+            signature = base64.b64decode(license_obj["signature"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid license format")
+
+        try:
+            PUBLIC_KEY.verify(
+                signature,
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+        except Exception:
+            raise HTTPException(status_code=400, detail="License signature invalid")
+
+        # =========================
+        # 2️⃣ Extract real license key
+        # =========================
+        license_key = payload.get("license_key")
+        if not license_key:
+            raise HTTPException(status_code=400, detail="License payload missing license_key")
+
+        # =========================
+        # 3️⃣ Fetch license from DB
+        # =========================
         lic = session.execute(sa.text("""
             SELECT id, status, activated, expires_at
             FROM licenses
             WHERE license_key = :tok
-        """), {"tok": req.license_key}).first()
+        """), {"tok": license_key}).first()
 
         if not lic:
             raise HTTPException(status_code=404, detail="License not found")
@@ -648,58 +686,42 @@ async def activate_license(req: ActivationRequest):
         if expires_at and expires_at < datetime.utcnow():
             raise HTTPException(status_code=400, detail="License expired")
 
+        # =========================
+        # 4️⃣ Activation logic (UNCHANGED)
+        # =========================
         last_terminal = _get_last_activation_terminal(session, license_id)
 
-        if activated:
-            if last_terminal and last_terminal != req.terminal_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="License already activated on another terminal"
-                )
+        if activated and last_terminal and last_terminal != req.terminal_id:
+            raise HTTPException(
+                status_code=400,
+                detail="License already activated on another terminal"
+            )
 
-            session.execute(sa.text("""
-                INSERT INTO license_activations (license_id, terminal_id, activated_at)
-                VALUES (:lid, :tid, now())
-            """), {"lid": license_id, "tid": req.terminal_id})
+        session.execute(sa.text("""
+            INSERT INTO license_activations (license_id, terminal_id, activated_at)
+            VALUES (:lid, :tid, now())
+        """), {"lid": license_id, "tid": req.terminal_id})
 
-            session.execute(sa.text("""
-                UPDATE licenses
-                SET activated = true, activated_at = now()
-                WHERE id = :lid
-            """), {"lid": license_id})
+        session.execute(sa.text("""
+            UPDATE licenses
+            SET activated = true, activated_at = now()
+            WHERE id = :lid
+        """), {"lid": license_id})
 
-            session.commit()
+        session.commit()
 
-        else:
-            if last_terminal and last_terminal != req.terminal_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="License has previous activation on a different terminal"
-                )
-
-            session.execute(sa.text("""
-                INSERT INTO license_activations (license_id, terminal_id, activated_at)
-                VALUES (:lid, :tid, now())
-            """), {"lid": license_id, "tid": req.terminal_id})
-
-            session.execute(sa.text("""
-                UPDATE licenses
-                SET activated = true, activated_at = now()
-                WHERE id = :lid
-            """), {"lid": license_id})
-
-            session.commit()
-
-        # 🔐 CREATE SIGNED LICENSE (THIS IS THE KEY CHANGE)
-        payload = {
+        # =========================
+        # 5️⃣ Return signed license (bound to terminal)
+        # =========================
+        new_payload = {
+            "license_key": license_key,
             "license_id": license_id,
-            "license_key": req.license_key,
             "terminal_id": req.terminal_id,
             "issued_at": datetime.utcnow().isoformat(),
             "expires_at": expires_at.isoformat() if expires_at else None
         }
 
-        signed_license = create_signed_license(payload)
+        signed_license = create_signed_license(new_payload)
 
         return {
             "ok": True,
@@ -713,7 +735,6 @@ async def activate_license(req: ActivationRequest):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
-
 
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")

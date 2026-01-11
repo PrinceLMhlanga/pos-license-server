@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives import serialization
 import json, base64
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 load_dotenv()
 router = APIRouter()
 
@@ -106,8 +107,18 @@ SessionLocal = sessionmaker(bind=engine)
 
 
 # --- Key loading ---
-PRIVATE_KEY = PRIVATE_KEY_ENV.encode() if isinstance(PRIVATE_KEY_ENV, str) else PRIVATE_KEY_ENV
-PUBLIC_KEY = PUBLIC_KEY_ENV.encode() if isinstance(PUBLIC_KEY_ENV, str) else PUBLIC_KEY_ENV
+
+if not PRIVATE_KEY_ENV or not PUBLIC_KEY_ENV:
+    raise RuntimeError("RSA keys not configured")
+
+PRIVATE_KEY = serialization.load_pem_private_key(
+    PRIVATE_KEY_ENV.replace("\\n", "\n").encode(),
+    password=None
+)
+
+PUBLIC_KEY = serialization.load_pem_public_key(
+    PUBLIC_KEY_ENV.replace("\\n", "\n").encode()
+)
 
 # --- FastAPI app ---
 app = FastAPI(title="License backend")

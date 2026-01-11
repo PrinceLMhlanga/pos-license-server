@@ -15,6 +15,10 @@ import requests
 from requests.auth import HTTPBasicAuth
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime
+from cryptography.hazmat.primitives import serialization
+import json, base64
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
 load_dotenv()
 router = APIRouter()
 
@@ -42,7 +46,13 @@ paynow = Paynow(
     PAYNOW_RETURN_URL,
     PAYNOW_RESULT_URL
 )
+if not PRIVATE_KEY_ENV:
+    raise RuntimeError("PRIVATE_KEY_ENV not set")
 
+PRIVATE_KEY = serialization.load_pem_private_key(
+    PRIVATE_KEY_ENV.replace("\\n", "\n").encode(),
+    password=None
+)
 class StartPaynowRequest(BaseModel):
     email: str = None
     phone: str = None
@@ -58,6 +68,31 @@ def paypal_headers():
     )
     r.raise_for_status()
     return r.json()["access_token"]
+def sign_license_payload(payload: dict) -> str:
+    data = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":")
+    ).encode()
+
+    signature = PRIVATE_KEY.sign(
+        data,
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+
+    return base64.b64encode(signature).decode()
+
+
+def create_signed_license(payload: dict) -> str:
+    license_obj = {
+        "payload": payload,
+        "signature": sign_license_payload(payload)
+    }
+
+    return base64.b64encode(
+        json.dumps(license_obj, separators=(",", ":")).encode()
+    ).decode()
 
 
 
@@ -334,19 +369,20 @@ def check_payment(req: PaymentCheckRequest):
 
             # Paid → issue or fetch existing license
             try:
-                license_key = issue_license_for_order(
+                license_payload = issue_license_for_order(
                     session=session,
                     provider="paynow",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
+                 signed_license = sign_license_rsa(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
                 traceback.print_exc()
                 session.rollback()
                 raise HTTPException(status_code=500, detail=f"Failed to issue license: {e}")
 
-            return {"ok": True, "status": "paid", "license": license_key}
+            return {"ok": True, "status": "paid", "license": signed_license}
 
         # =========================
         # PAYPAL
@@ -381,19 +417,20 @@ def check_payment(req: PaymentCheckRequest):
                 return {"ok": False, "status": capture.get("status", "").lower()}
 
             try:
-                license_key = issue_license_for_order(
+                license_payload = issue_license_for_order(
                     session=session,
                     provider="paypal",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
+                signed_license = sign_license_rsa(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
                 traceback.print_exc()
                 session.rollback()
                 raise HTTPException(status_code=500, detail=f"Failed to issue license: {e}")
 
-            return {"ok": True, "status": "paid", "license": license_key}
+            return {"ok": True, "status": "paid", "license": signed_license}
 
         # =========================
         # UNKNOWN PROVIDER
@@ -569,41 +606,81 @@ async def webhook_payment(payload: PaymentWebhook, background_tasks: BackgroundT
 async def activate_license(req: ActivationRequest):
     session = SessionLocal()
     try:
-        lic = session.execute(sa.text(
-            "SELECT id, status, activated FROM licenses WHERE license_key = :tok"
-        ), {"tok": req.license_key}).first()
+        lic = session.execute(sa.text("""
+            SELECT id, status, activated, expires_at
+            FROM licenses
+            WHERE license_key = :tok
+        """), {"tok": req.license_key}).first()
+
         if not lic:
             raise HTTPException(status_code=404, detail="License not found")
-        license_id, status, activated = lic
+
+        license_id, status, activated, expires_at = lic
 
         if status in ("revoked", "expired"):
             raise HTTPException(status_code=400, detail="License is not valid")
 
+        if expires_at and expires_at < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="License expired")
+
         last_terminal = _get_last_activation_terminal(session, license_id)
+
         if activated:
             if last_terminal and last_terminal != req.terminal_id:
-                raise HTTPException(status_code=400, detail="License already activated on another terminal")
-            # Same terminal re-activation: log + update timestamp
-            session.execute(sa.text(
-                "INSERT INTO license_activations (license_id, terminal_id, activated_at) VALUES (:lid, :tid, now())"
-            ), {"lid": license_id, "tid": req.terminal_id})
-            session.execute(sa.text(
-                "UPDATE licenses SET activated = true, activated_at = now() WHERE id = :lid"
-            ), {"lid": license_id})
-            session.commit()
-            return {"ok": True, "message": "License re-activated for same terminal"}
+                raise HTTPException(
+                    status_code=400,
+                    detail="License already activated on another terminal"
+                )
 
-        # Not yet activated/other terminal
-        if last_terminal and last_terminal != req.terminal_id:
-            raise HTTPException(status_code=400, detail="License has previous activation on a different terminal and cannot be activated here")
-        session.execute(sa.text(
-            "INSERT INTO license_activations (license_id, terminal_id, activated_at) VALUES (:lid, :tid, now())"
-        ), {"lid": license_id, "tid": req.terminal_id})
-        session.execute(sa.text(
-            "UPDATE licenses SET activated = true, activated_at = now() WHERE id = :lid"
-        ), {"lid": license_id})
-        session.commit()
-        return {"ok": True}
+            session.execute(sa.text("""
+                INSERT INTO license_activations (license_id, terminal_id, activated_at)
+                VALUES (:lid, :tid, now())
+            """), {"lid": license_id, "tid": req.terminal_id})
+
+            session.execute(sa.text("""
+                UPDATE licenses
+                SET activated = true, activated_at = now()
+                WHERE id = :lid
+            """), {"lid": license_id})
+
+            session.commit()
+
+        else:
+            if last_terminal and last_terminal != req.terminal_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="License has previous activation on a different terminal"
+                )
+
+            session.execute(sa.text("""
+                INSERT INTO license_activations (license_id, terminal_id, activated_at)
+                VALUES (:lid, :tid, now())
+            """), {"lid": license_id, "tid": req.terminal_id})
+
+            session.execute(sa.text("""
+                UPDATE licenses
+                SET activated = true, activated_at = now()
+                WHERE id = :lid
+            """), {"lid": license_id})
+
+            session.commit()
+
+        # 🔐 CREATE SIGNED LICENSE (THIS IS THE KEY CHANGE)
+        payload = {
+            "license_id": license_id,
+            "license_key": req.license_key,
+            "terminal_id": req.terminal_id,
+            "issued_at": datetime.utcnow().isoformat(),
+            "expires_at": expires_at.isoformat() if expires_at else None
+        }
+
+        signed_license = create_signed_license(payload)
+
+        return {
+            "ok": True,
+            "license": signed_license
+        }
+
     except HTTPException:
         raise
     except Exception as ex:
@@ -612,24 +689,55 @@ async def activate_license(req: ActivationRequest):
     finally:
         session.close()
 
-# --- LICENSE VERIFICATION (for client/installer) ---
+
+# --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")
-async def verify_license(license_key: str):
+async def verify_license(
+    license_key: str,
+    terminal_id: str | None = None
+):
     session = SessionLocal()
     try:
         lic = session.execute(sa.text("""
-            SELECT id, status, activated, expires_at 
-            FROM licenses WHERE license_key = :key
+            SELECT id, status, activated, expires_at
+            FROM licenses
+            WHERE license_key = :key
         """), {"key": license_key}).first()
 
         if not lic:
             raise HTTPException(status_code=404, detail="License not found")
-        _, status, activated, expires_at = lic
+
+        license_id, status, activated, expires_at = lic
+
         if status in ("revoked", "expired"):
-            raise HTTPException(status_code=400, detail="License invalid or expired")
+            raise HTTPException(
+                status_code=400,
+                detail="License revoked or expired"
+            )
+
         if expires_at and expires_at < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="License expired")
-        return {"ok": True, "activated": activated, "status": status}
+            raise HTTPException(
+                status_code=400,
+                detail="License expired"
+            )
+
+        # 🔐 OPTIONAL TERMINAL CHECK (ONLINE VALIDATION)
+        if terminal_id:
+            last_terminal = _get_last_activation_terminal(session, license_id)
+            if last_terminal and last_terminal != terminal_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="License is bound to a different terminal"
+                )
+
+        return {
+            "ok": True,
+            "license_id": license_id,
+            "activated": activated,
+            "status": status,
+            "expires_at": expires_at.isoformat() if expires_at else None
+        }
+
     except HTTPException:
         raise
     except Exception as ex:

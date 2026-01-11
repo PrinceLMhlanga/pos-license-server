@@ -69,31 +69,40 @@ def paypal_headers():
     )
     r.raise_for_status()
     return r.json()["access_token"]
-def sign_license_payload(payload: dict) -> str:
-    data = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":")
-    ).encode()
-
-    signature = PRIVATE_KEY.sign(
-        data,
-        padding.PKCS1v15(),
-        hashes.SHA256()
-    )
-
-    return base64.b64encode(signature).decode()
-
 
 def create_signed_license(payload: dict) -> str:
-    license_obj = {
-        "payload": payload,
-        "signature": sign_license_payload(payload)
-    }
+    """
+    Returns BASE64(JSON({ payload, signature }))
+    """
 
-    return base64.b64encode(
-        json.dumps(license_obj, separators=(",", ":")).encode()
+    # 1️⃣ Canonical JSON (MUST match VB expectations)
+    payload_bytes = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True
+    ).encode()
+
+    # 2️⃣ Base64 payload
+    payload_b64 = base64.b64encode(payload_bytes).decode()
+
+    # 3️⃣ Sign BASE64 payload (IMPORTANT)
+    signature = base64.b64encode(
+        PRIVATE_KEY.sign(
+            payload_b64.encode(),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
     ).decode()
+
+    # 4️⃣ Final license blob
+    license_blob = base64.b64encode(
+        json.dumps({
+            "payload": payload_b64,
+            "signature": signature
+        }, separators=(",", ":")).encode()
+    ).decode()
+
+    return license_blob
 
 
 

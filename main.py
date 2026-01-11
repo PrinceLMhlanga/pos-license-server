@@ -375,7 +375,7 @@ def check_payment(req: PaymentCheckRequest):
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
-                signed_license = sign_license_rsa(license_payload)  # returns BASE64(payload).BASE64(signature)
+                signed_license = create_signed_license(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
                 traceback.print_exc()
@@ -423,7 +423,7 @@ def check_payment(req: PaymentCheckRequest):
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE"
                 )
-                signed_license = sign_license_rsa(license_payload)  # returns BASE64(payload).BASE64(signature)
+                signed_license = create_signed_license(license_payload)  # returns BASE64(payload).BASE64(signature)
                 session.commit()
             except Exception as e:
                 traceback.print_exc()

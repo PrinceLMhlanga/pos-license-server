@@ -154,7 +154,7 @@ class Payment(Base):
     status = Column(String, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
 class ActivationRequest(BaseModel):
-    license_key: str
+    license: str
     terminal_id: str
    
 class PaymentCheckRequest(BaseModel):
@@ -204,6 +204,30 @@ def issue_license_for_order(session, provider, provider_order_id, product, email
 
     session.commit()
     return license_key
+
+def verify_and_extract_license(signed_license: str) -> dict:
+    try:
+        decoded = base64.b64decode(signed_license).decode()
+        obj = json.loads(decoded)
+
+        payload_b64 = obj["payload"]
+        signature = base64.b64decode(obj["signature"])
+
+        # verify signature against BASE64 payload
+        PUBLIC_KEY.verify(
+            signature,
+            payload_b64.encode(),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+
+        # decode payload
+        payload_json = base64.b64decode(payload_b64).decode()
+        return json.loads(payload_json)
+
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid license format or signature")
+
 def paypal_get_order(order_id):
     token = paypal_headers()
     r = requests.get(
@@ -647,21 +671,24 @@ async def activate_license(req: ActivationRequest):
     session = SessionLocal()
     try:
         # =========================
-        # 1️⃣ Decode & verify signed license
+        # 1️⃣ Decode signed license
         # =========================
         try:
-            decoded = base64.b64decode(req.license)
-            license_obj = json.loads(decoded)
+            decoded_json = base64.b64decode(req.license).decode()
+            license_obj = json.loads(decoded_json)
 
-            payload = license_obj["payload"]
+            payload_b64 = license_obj["payload"]          # 🔑 BASE64 payload
             signature = base64.b64decode(license_obj["signature"])
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid license format")
 
+        # =========================
+        # 2️⃣ Verify signature (IMPORTANT FIX)
+        # =========================
         try:
             PUBLIC_KEY.verify(
                 signature,
-                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+                payload_b64.encode(),   # ✅ VERIFY EXACT DATA THAT WAS SIGNED
                 padding.PKCS1v15(),
                 hashes.SHA256()
             )
@@ -669,20 +696,26 @@ async def activate_license(req: ActivationRequest):
             raise HTTPException(status_code=400, detail="License signature invalid")
 
         # =========================
-        # 2️⃣ Extract real license key
+        # 3️⃣ Decode payload AFTER verification
         # =========================
+        try:
+            payload_json = base64.b64decode(payload_b64).decode()
+            payload = json.loads(payload_json)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid license payload")
+
         license_key = payload.get("license_key")
         if not license_key:
             raise HTTPException(status_code=400, detail="License payload missing license_key")
 
         # =========================
-        # 3️⃣ Fetch license from DB
+        # 4️⃣ Fetch license from DB
         # =========================
         lic = session.execute(sa.text("""
             SELECT id, status, activated, expires_at
             FROM licenses
-            WHERE license_key = :tok
-        """), {"tok": license_key}).first()
+            WHERE license_key = :k
+        """), {"k": license_key}).first()
 
         if not lic:
             raise HTTPException(status_code=404, detail="License not found")
@@ -696,7 +729,7 @@ async def activate_license(req: ActivationRequest):
             raise HTTPException(status_code=400, detail="License expired")
 
         # =========================
-        # 4️⃣ Activation logic (UNCHANGED)
+        # 5️⃣ Activation logic
         # =========================
         last_terminal = _get_last_activation_terminal(session, license_id)
 
@@ -720,7 +753,7 @@ async def activate_license(req: ActivationRequest):
         session.commit()
 
         # =========================
-        # 5️⃣ Return signed license (bound to terminal)
+        # 6️⃣ Re-issue signed license (terminal-bound)
         # =========================
         new_payload = {
             "license_key": license_key,

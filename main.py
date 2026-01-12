@@ -780,6 +780,41 @@ async def activate_license(req: ActivationRequest):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+
+@app.get("/payment/return", response_class=HTMLResponse)
+async def paynow_return(request: Request):
+    return """
+    <html>
+        <head>
+            <title>Payment Successful</title>
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    text-align: center;
+                    padding: 40px;
+                }
+                .box {
+                    max-width: 500px;
+                    margin: auto;
+                    border: 1px solid #ddd;
+                    padding: 30px;
+                    border-radius: 8px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h2>✅ Payment Submitted</h2>
+                <p>Your payment was received successfully.</p>
+                <p><strong>Please return to the SwiftPOS app</strong><br>
+                and click <b>Check Payment</b> to receive your license.</p>
+                <p>You may now close this window.</p>
+            </div>
+        </body>
+    </html>
+    """
 
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")

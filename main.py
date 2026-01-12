@@ -362,68 +362,7 @@ def start_paynow_payment(req: StartPaynowRequest):
     finally:
         session.close()
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
 
-router = APIRouter()
-
-@router.get("/success", response_class=HTMLResponse)
-def payment_success():
-    return """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Payment Successful</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                background: #f5f7fa;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 100vh;
-                margin: 0;
-            }
-            .card {
-                background: white;
-                padding: 30px;
-                border-radius: 8px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-                max-width: 500px;
-                text-align: center;
-            }
-            h1 {
-                color: #2e7d32;
-            }
-            p {
-                color: #444;
-                font-size: 16px;
-            }
-            .note {
-                margin-top: 20px;
-                font-size: 14px;
-                color: #666;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>✅ Payment Successful</h1>
-            <p>
-                Your payment was received successfully.
-            </p>
-            <p>
-                Please return to the <strong>SwiftPOS</strong> application and click
-                <strong>“Check Payment”</strong> to obtain your license key.
-            </p>
-            <p class="note">
-                You may safely close this window.
-            </p>
-        </div>
-    </body>
-    </html>
-    """
 
 
 from fastapi import HTTPException

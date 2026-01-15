@@ -783,38 +783,89 @@ async def activate_license(req: ActivationRequest):
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 
-@app.get("/payment/return", response_class=HTMLResponse)
-async def paynow_return(request: Request):
-    return """
-    <html>
-        <head>
-            <title>Payment Successful</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    text-align: center;
-                    padding: 40px;
-                }
-                .box {
-                    max-width: 500px;
-                    margin: auto;
-                    border: 1px solid #ddd;
-                    padding: 30px;
-                    border-radius: 8px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="box">
-                <h2>✅ Payment Submitted</h2>
-                <p>Your payment was received successfully.</p>
-                <p><strong>Please return to the SwiftPOS app</strong><br>
-                and click <b>Check Payment</b> to receive your license.</p>
-                <p>You may now close this window.</p>
-            </div>
-        </body>
-    </html>
-    """
+@router.get("/payment/return")
+def payment_return(reference: str, provider: str):
+    provider = provider.lower()
+
+    # ---- PAYNOW ----
+    if provider == "paynow":
+        status = paynow_check_status(reference)
+
+        if status == "paid":
+            return {
+                "status": "paid",
+                "title": "Payment Successful 🎉",
+                "message": (
+                    "Your payment was received successfully.\n\n"
+                    "Please return to the SwiftPOS app and click "
+                    "'Check Payment' to receive your license."
+                )
+            }
+
+        if status in ("awaiting delivery", "sent"):
+            return {
+                "status": "pending",
+                "title": "Payment Pending ⏳",
+                "message": (
+                    "Your payment is still being processed.\n\n"
+                    "If you have already completed the transfer, "
+                    "please wait a few moments and try again."
+                )
+            }
+
+        return {
+            "status": "failed",
+            "title": "Payment Not Completed ❌",
+            "message": (
+                "The payment was not completed.\n\n"
+                "This may be due to cancellation or insufficient funds.\n"
+                "No license has been issued."
+            )
+        }
+
+    # ---- PAYPAL ----
+    if provider == "paypal":
+        order = paypal_get_order(reference)
+
+        if order["status"] == "COMPLETED":
+            return {
+                "status": "paid",
+                "title": "Payment Successful 🎉",
+                "message": (
+                    "Thank you for your purchase.\n\n"
+                    "Please return to the SwiftPOS app and click "
+                    "'Check Payment' to receive your license."
+                )
+            }
+
+        if order["status"] in ("CREATED", "APPROVED"):
+            return {
+                "status": "pending",
+                "title": "Payment Pending ⏳",
+                "message": (
+                    "Your payment has not been completed yet.\n\n"
+                    "If you intended to pay, please complete the payment."
+                )
+            }
+
+        return {
+            "status": "failed",
+            "title": "Payment Cancelled ❌",
+            "message": (
+                "The payment was cancelled or failed.\n\n"
+                "No money was charged."
+            )
+        }
+
+    raise HTTPException(status_code=400, detail="Unknown provider")
+
+@router.get("/payment/cancel")
+def payment_cancel():
+    return {
+        "status": "cancelled",
+        "title": "Payment Cancelled",
+        "message": "You cancelled the payment. No money was charged."
+    }
 
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")

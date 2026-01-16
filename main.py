@@ -780,13 +780,11 @@ async def activate_license(req: ActivationRequest):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
-from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-
-app = FastAPI()
+from fastapi import Request
 
 @app.get("/payment/return", response_class=HTMLResponse)
-def payment_return():
+async def payment_return(request: Request):
     html_content = """
     <html>
         <head>
@@ -836,7 +834,6 @@ def payment_return():
     </html>
     """
     return HTMLResponse(content=html_content)
-
 
 
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---

@@ -780,126 +780,62 @@ async def activate_license(req: ActivationRequest):
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
-from fastapi import Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse
+app = FastAPI()
 
-router = APIRouter()
-
-@router.get("/payment/return", response_class=HTMLResponse)
-def payment_return(provider: str = Query(...), reference: str = Query(...)):
-    provider = provider.lower().strip()
-    title, message, color = "", "", ""
-
-    try:
-        if provider == "paynow":
-            status = paynow_check_status(reference)
-            status_map = {
-                "paid": "paid",
-                "awaiting delivery": "pending",
-                "awaiting payment": "pending",
-                "created": "pending",
-                "cancelled": "failed",
-                "failed": "failed",
-                "disputed": "failed",
-            }
-            status = status_map.get(str(status).strip().lower(), "pending")
-
-        elif provider == "paypal":
-            order = paypal_get_order(reference)
-            if order.get("status") == "CREATED" or order.get("status") == "APPROVED":
-                status = "pending"
-            elif order.get("status") == "COMPLETED":
-                status = "paid"
-            else:
-                status = "failed"
-        else:
-            raise HTTPException(status_code=400, detail="Unknown provider")
-
-        # Decide message
-        if status == "paid":
-            title = "Payment Successful 🎉"
-            message = (
-                "Your payment was received successfully.<br><br>"
-                "Please return to the SwiftPOS app and click "
-                "<strong>'Check Payment'</strong> to receive your license."
-            )
-            color = "green"
-        elif status == "pending":
-            title = "Payment Pending ⏳"
-            message = (
-                "Your payment is still being processed.<br><br>"
-                "If you have completed the transfer, please wait a few moments and try again."
-            )
-            color = "orange"
-        else:
-            title = "Payment Failed ❌"
-            message = (
-                "The payment was not completed or was cancelled.<br><br>"
-                "No money was charged."
-            )
-            color = "red"
-
-        # Styled HTML
-        html_content = f"""
-        <html>
-            <head>
-                <title>{title}</title>
-                <style>
-                    body {{
-                        font-family: Arial, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        background-color: #f5f5f5;
-                    }}
-                    .card {{
-                        background-color: white;
-                        padding: 40px;
-                        border-radius: 12px;
-                        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-                        text-align: center;
-                        max-width: 500px;
-                    }}
-                    .title {{
-                        font-size: 24px;
-                        font-weight: bold;
-                        color: {color};
-                        margin-bottom: 20px;
-                    }}
-                    .message {{
-                        font-size: 16px;
-                        color: #333;
-                        line-height: 1.5;
-                    }}
-                    .button {{
-                        margin-top: 30px;
-                        display: inline-block;
-                        padding: 12px 24px;
-                        background-color: {color};
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-weight: bold;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <div class="title">{title}</div>
-                    <div class="message">{message}</div>
-                    <a href="swiftpos://checkpayment" class="button">Open SwiftPOS</a>
+@app.get("/payment/return", response_class=HTMLResponse)
+def payment_return():
+    html_content = """
+    <html>
+        <head>
+            <title>Return to SwiftPOS</title>
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    background-color: #f0f2f5;
+                    margin: 0;
+                }
+                .card {
+                    background-color: #fff;
+                    padding: 40px;
+                    border-radius: 16px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                    text-align: center;
+                    max-width: 500px;
+                }
+                .title {
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4CAF50;
+                    margin-bottom: 20px;
+                }
+                .message {
+                    font-size: 16px;
+                    color: #333;
+                    line-height: 1.5;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div class="title">Return to SwiftPOS</div>
+                <div class="message">
+                    Please return to your SwiftPOS desktop app and click <strong>'Check Payment'</strong> 
+                    to view your payment status.<br><br>
+                    If your payment was successful, the license will be autofilled automatically. 
+                    You can then click <strong>'Activate'</strong> to proceed.
                 </div>
-            </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content)
-
-    except Exception as e:
-        return HTMLResponse(content=f"<h1>Error</h1><p>{str(e)}</p>", status_code=500)
+            </div>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 @router.get("/payment/cancel")

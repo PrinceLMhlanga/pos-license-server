@@ -836,6 +836,57 @@ async def payment_return(request: Request):
     return HTMLResponse(content=html_content)
 
 
+@router.get("/payment/cancel", response_class=HTMLResponse)
+def payment_cancel():
+    html_content = """
+    <html>
+        <head>
+            <title>Payment Cancelled</title>
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    background-color: #f0f2f5;
+                    margin: 0;
+                }
+                .card {
+                    background-color: #fff;
+                    padding: 40px;
+                    border-radius: 16px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                    text-align: center;
+                    max-width: 500px;
+                }
+                .title {
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #e74c3c;
+                    margin-bottom: 20px;
+                }
+                .message {
+                    font-size: 16px;
+                    color: #333;
+                    line-height: 1.5;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div class="title">Payment Cancelled ❌</div>
+                <div class="message">
+                    You cancelled the payment. No money was charged.<br><br>
+                    You can safely return to the SwiftPOS app and try again if you wish.
+                </div>
+            </div>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")
 async def verify_license(

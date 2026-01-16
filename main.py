@@ -838,13 +838,6 @@ def payment_return():
     return HTMLResponse(content=html_content)
 
 
-@router.get("/payment/cancel")
-def payment_cancel():
-    return {
-        "status": "cancelled",
-        "title": "Payment Cancelled",
-        "message": "You cancelled the payment. No money was charged."
-    }
 
 # --- LICENSE VERIFICATION (ONLINE / INSTALLER / SUPPORT) ---
 @app.get("/licenses/verify/{license_key}")

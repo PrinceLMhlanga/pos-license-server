@@ -175,6 +175,8 @@ class ActivationRequest(BaseModel):
 class PaymentCheckRequest(BaseModel):
     provider: str
     reference: str
+    email: str
+    phone: str
 
 # after Base = declarative_base() and model classes and after engine = sa.create_engine(...)
 Base.metadata.create_all(bind=engine)

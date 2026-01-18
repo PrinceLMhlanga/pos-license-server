@@ -382,6 +382,8 @@ def start_paynow_payment(req: StartPaynowRequest):
 
 from fastapi import HTTPException
 import traceback
+email = getattr(req, "customer_email", None) or getattr(req, "email", None)
+phone = getattr(req, "customer_phone", None) or getattr(req, "phone", None)
 
 @router.post("/payment/check")
 def check_payment(req: PaymentCheckRequest):
@@ -436,8 +438,8 @@ def check_payment(req: PaymentCheckRequest):
                     provider="paynow",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE",
-                    email=payload.customer_email or payload.email,  # pick the correct field
-                    phone=payload.customer_phone or payload.phone
+                    email=email,  # pick the correct field
+                    phone=phone
                 )
                 license_payload = {
                     "license_key": license_key,
@@ -493,8 +495,8 @@ def check_payment(req: PaymentCheckRequest):
                     provider="paypal",
                     provider_order_id=req.reference,
                     product="SWIFTPOS_SINGLE",
-                    email=payload.customer_email or payload.email,  # pick the correct field
-                    phone=payload.customer_phone or payload.phone
+                    email=email,  # pick the correct field
+                    phone=phone
                 )
 
                 license_payload = {

@@ -432,8 +432,8 @@ def check_payment(req: PaymentCheckRequest):
 
             # Paid → issue or fetch existing license
             try:
-                email = getattr(req, "customer_email", None) or getattr(req, "email", None)
-                phone = getattr(req, "customer_phone", None) or getattr(req, "phone", None)
+                email = req.email
+                phone = req.phone
                 license_key = issue_license_for_order(
                     session=session,
                     provider="paynow",
@@ -491,8 +491,8 @@ def check_payment(req: PaymentCheckRequest):
                 return {"ok": False, "status": capture.get("status", "").lower()}
 
             try:
-                email = getattr(req, "customer_email", None) or getattr(req, "email", None)
-                phone = getattr(req, "customer_phone", None) or getattr(req, "phone", None)
+                email = req.email
+                phone = req.phone
                 license_key = issue_license_for_order(
                     session=session,
                     provider="paypal",

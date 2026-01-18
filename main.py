@@ -20,6 +20,9 @@ import json, base64
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
+from sqlalchemy import create_engine
+from sqlalchemy import text
+
 load_dotenv()
 router = APIRouter()
 
@@ -110,9 +113,21 @@ def create_signed_license(payload: dict) -> str:
 if not all([DATABASE_URL, PRIVATE_KEY_ENV, PUBLIC_KEY_ENV]):
     raise RuntimeError("Set DATABASE_URL, PRIVATE_KEY, and PUBLIC_KEY in environment or .env")
 
-# --- SQLAlchemy ---
-engine = sa.create_engine(DATABASE_URL, echo=False, future=True)
-SessionLocal = sessionmaker(bind=engine)
+
+
+# --- SQLAlchemy production setup ---
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,            # Keep False in production
+    future=True,           # Keep True if using 2.0 style
+    pool_size=5,           # Max active connections to DB
+    max_overflow=5,        # Extra connections beyond pool_size
+    pool_pre_ping=True,    # Check connection before using
+    pool_recycle=300       # Recycle idle connections after 5 minutes
+)
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
 
 
 # --- Key loading ---
@@ -420,7 +435,9 @@ def check_payment(req: PaymentCheckRequest):
                     session=session,
                     provider="paynow",
                     provider_order_id=req.reference,
-                    product="SWIFTPOS_SINGLE"
+                    product="SWIFTPOS_SINGLE",
+                    email=payload.customer_email or payload.email,  # pick the correct field
+                    phone=payload.customer_phone or payload.phone
                 )
                 license_payload = {
                     "license_key": license_key,
@@ -475,7 +492,9 @@ def check_payment(req: PaymentCheckRequest):
                     session=session,
                     provider="paypal",
                     provider_order_id=req.reference,
-                    product="SWIFTPOS_SINGLE"
+                    product="SWIFTPOS_SINGLE",
+                    email=payload.customer_email or payload.email,  # pick the correct field
+                    phone=payload.customer_phone or payload.phone
                 )
 
                 license_payload = {
@@ -941,7 +960,14 @@ async def verify_license(
         raise HTTPException(status_code=500, detail=str(ex))
     finally:
         session.close()
-
+@app.get("/health")
+def health_check():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))  # simple query to test DB
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {"status": "error", "details": str(e)}
 # --- PUBLIC KEY DOWNLOAD ---
 @app.get("/public_key")
 async def public_key():

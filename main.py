@@ -814,7 +814,7 @@ async def payment_return(request: Request):
     html_content = """
     <html>
         <head>
-            <title>Return to SwiftPOS</title>
+            <title>Return to ReedPOS</title>
             <style>
                 body {
                     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -848,9 +848,9 @@ async def payment_return(request: Request):
         </head>
         <body>
             <div class="card">
-                <div class="title">Return to SwiftPOS</div>
+                <div class="title">Return to ReedPOS</div>
                 <div class="message">
-                    Please return to your SwiftPOS desktop app and click <strong>'Check Payment'</strong> 
+                    Please return to your ReedPOS desktop app and click <strong>'Check Payment'</strong> 
                     to view your payment status.<br><br>
                     If your payment was successful, the license will be autofilled automatically. 
                     You can then click <strong>'Activate'</strong> to proceed.
@@ -904,7 +904,7 @@ def payment_cancel():
                 <div class="title">Payment Cancelled ❌</div>
                 <div class="message">
                     You cancelled the payment. No money was charged.<br><br>
-                    You can safely return to the SwiftPOS app and try again if you wish.
+                    You can safely return to the ReedPOS app and try again if you wish.
                 </div>
             </div>
         </body>
